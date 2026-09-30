@@ -100,7 +100,8 @@ static void set_max_width(const MenuEntry* entries, int size)
 {
     for (int j, i = 0; i < size; i++)
     {
-        if ((j = pkgi_text_width(entries[i].text) + PKGI_MENU_LEFT_PADDING*2) > pkgi_menu_width)
+        if ((j = pkgi_text_width(entries[i].text) + PKGI_MENU_LEFT_PADDING*2 +
+                 PKGI_FONT_WIDTH + 6) > pkgi_menu_width)
             pkgi_menu_width = j;
     }
 }
@@ -151,6 +152,8 @@ void pkgi_menu_start(int search_clear, const Config* config)
     pkgi_menu_width = PKGI_MENU_WIDTH;
     set_max_width(menu_entries, PKGI_COUNTOF(menu_entries));
     set_max_width(content_entries, PKGI_COUNTOF(content_entries));
+    if (pkgi_menu_width > VITA_WIDTH - 2 * PKGI_MAIN_HMARGIN)
+        pkgi_menu_width = VITA_WIDTH - 2 * PKGI_MAIN_HMARGIN;
 }
 
 int pkgi_do_menu(pkgi_input* input)
@@ -304,6 +307,10 @@ int pkgi_do_menu(pkgi_input* input)
 
     int font_height = pkgi_text_height("M");
 
+    int menu_x = VITA_WIDTH - (pkgi_menu_width + PKGI_MAIN_HMARGIN);
+    pkgi_clip_set(menu_x, PKGI_MAIN_VMARGIN, pkgi_menu_width,
+                  PKGI_MENU_HEIGHT);
+
     int y = PKGI_MENU_TOP_PADDING;
     for (uint32_t i = 0; i < PKGI_COUNTOF(menu_entries); i++)
     {
@@ -383,5 +390,6 @@ int pkgi_do_menu(pkgi_input* input)
         y += font_height;
     }
 
+    pkgi_clip_remove();
     return 1;
 }

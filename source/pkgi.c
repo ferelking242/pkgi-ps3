@@ -540,7 +540,7 @@ static void pkgi_do_main(pkgi_input* input)
         pkgi_clip_remove();
 
         pkgi_clip_set(col_name, y, VITA_WIDTH - PKGI_MAIN_SCROLL_WIDTH - PKGI_MAIN_SCROLL_PADDING - PKGI_MAIN_COLUMN_PADDING - sizew - col_name, line_height);
-        pkgi_draw_text_ttf(0, 0, PKGI_FONT_Z, color, item->name);
+        pkgi_draw_text_ttf(col_name, y, PKGI_FONT_Z, color, item->name);
         pkgi_clip_remove();
 
         y += font_height + PKGI_MAIN_ROW_PADDING;
@@ -738,6 +738,10 @@ static void pkgi_do_error(void)
             line_count++;
     }
 
+    const int margin = 32;
+    pkgi_clip_set(margin, margin, VITA_WIDTH - 2 * margin,
+                  VITA_HEIGHT - 2 * margin);
+
     int y = (VITA_HEIGHT - line_count * line_height) / 2;
     while (*text)
     {
@@ -753,7 +757,11 @@ static void pkgi_do_error(void)
         line[length] = 0;
 
         int width = pkgi_text_width_ttf(line);
-        pkgi_draw_text_ttf((VITA_WIDTH - width) / 2, y, PKGI_FONT_Z,
+        int available_width = VITA_WIDTH - 2 * margin;
+        int x = width <= available_width
+            ? margin + (available_width - width) / 2
+            : margin;
+        pkgi_draw_text_ttf(x, y, PKGI_FONT_Z,
                            PKGI_COLOR_TEXT_ERROR, line);
         y += line_height;
 
@@ -761,6 +769,8 @@ static void pkgi_do_error(void)
         if (*text == '\n')
             text++;
     }
+
+    pkgi_clip_remove();
 }
 
 static void reposition(void)

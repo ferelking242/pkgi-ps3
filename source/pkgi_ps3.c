@@ -1022,14 +1022,54 @@ void pkgi_free_texture(pkgi_texture texture)
 }
 
 
+#define PKGI_TTF_CELL_WIDTH  (PKGI_FONT_WIDTH + 6)
+#define PKGI_TTF_LINE_HEIGHT (PKGI_FONT_HEIGHT + 2)
+
+static int text_clip_x = 0;
+static int text_clip_y = 0;
+static int text_clip_w = VITA_WIDTH;
+static int text_clip_h = VITA_HEIGHT;
+
+static void pkgi_apply_text_window(void)
+{
+    set_ttf_window(text_clip_x, text_clip_y, text_clip_w, text_clip_h,
+                   WIN_AUTO_LF);
+}
+
 void pkgi_clip_set(int x, int y, int w, int h)
 {
-    set_ttf_window(x, y, w, h*2, 0);
+    if (x < 0)
+    {
+        w += x;
+        x = 0;
+    }
+    if (y < 0)
+    {
+        h += y;
+        y = 0;
+    }
+
+    if (x > VITA_WIDTH) x = VITA_WIDTH;
+    if (y > VITA_HEIGHT) y = VITA_HEIGHT;
+    if (w < 0) w = 0;
+    if (h < 0) h = 0;
+    if (w > VITA_WIDTH - x) w = VITA_WIDTH - x;
+    if (h > VITA_HEIGHT - y) h = VITA_HEIGHT - y;
+
+    text_clip_x = x;
+    text_clip_y = y;
+    text_clip_w = w;
+    text_clip_h = h;
+    pkgi_apply_text_window();
 }
 
 void pkgi_clip_remove(void)
 {
-    set_ttf_window(0, 0, VITA_WIDTH, VITA_HEIGHT, 0);
+    text_clip_x = 0;
+    text_clip_y = 0;
+    text_clip_w = VITA_WIDTH;
+    text_clip_h = VITA_HEIGHT;
+    pkgi_apply_text_window();
 }
 
 void pkgi_draw_fill_rect(int x, int y, int w, int h, uint32_t color)
@@ -1052,72 +1092,301 @@ void pkgi_draw_rect(int x, int y, int w, int h, uint32_t color)
 	ya2d_drawRect(x, y, w, h, RGBA_COLOR(color, 255));
 }
 
-void pkgi_draw_text_z(int x, int y, int z, uint32_t color, const char* text)
+static int pkgi_text_icon(unsigned char ch)
 {
-    int i=x, j=y;
-    SetFontColor(RGBA_COLOR(color, 255), 0);
-    while (*text) {
-        switch(*text) {
-            case '\n':
-                i = x;
-                j += PKGI_FONT_HEIGHT;
-                text++;
-                continue;
-            case '\xfa':
-                pkgi_draw_texture_z(tex_buttons.circle, i, j, z, 0.5f);
-                i += PKGI_FONT_WIDTH;
-                text++;
-                continue;
-            case '\xfb':
-                pkgi_draw_texture_z(tex_buttons.cross, i, j, z, 0.5f);
-                i += PKGI_FONT_WIDTH;
-                text++;
-                continue;
-            case '\xfc':
-                pkgi_draw_texture_z(tex_buttons.triangle, i, j, z, 0.5f);
-                i += PKGI_FONT_WIDTH;
-                text++;
-                continue;
-            case '\xfd':
-                pkgi_draw_texture_z(tex_buttons.square, i, j, z, 0.5f);
-                i += PKGI_FONT_WIDTH;
-                text++;
-                continue;
-        }
-        
-        DrawChar(i, j, z, (u8) *text);
-        i += PKGI_FONT_WIDTH;
-        text++; 
-    }    
+    return ch == 0x04 || ch == 0x09 || ch == 0x1e || ch == 0x1f ||
+           ch == 0xaf || ch == 0xf8 ||
+           (ch >= 0xfa && ch <= 0xfd);
 }
 
-
-void pkgi_draw_text_ttf(int x, int y, int z, uint32_t color, const char* text)
+static int pkgi_utf8_char_size(const unsigned char* text)
 {
-    Z_ttf = z;
-    display_ttf_string(x+PKGI_FONT_SHADOW, y+PKGI_FONT_SHADOW, text, RGBA_COLOR(PKGI_COLOR_TEXT_SHADOW, 128), 0, PKGI_FONT_WIDTH+6, PKGI_FONT_HEIGHT+2);
-    display_ttf_string(x, y, text, RGBA_COLOR(color, 255), 0, PKGI_FONT_WIDTH+6, PKGI_FONT_HEIGHT+2);
+    unsigned char ch = text[0];
+    if (ch >= 0xc2 && ch <= 0xdf && (text[1] & 0xc0) == 0x80)
+        return 2;
+    if (ch >= 0xe0 && ch <= 0xef &&
+        (text[1] & 0xc0) == 0x80 && (text[2] & 0xc0) == 0x80)
+        return 3;
+    if (ch >= 0xf0 && ch <= 0xf4 &&
+        (text[1] & 0xc0) == 0x80 && (text[2] & 0xc0) == 0x80 &&
+        (text[3] & 0xc0) == 0x80)
+        return 4;
+    return 1;
+}
+
+static void pkgi_measure_flush(char* text, uint32_t* length, int* line_width)
+{
+    if (*length)
+    {
+        text[*length] = 0;
+        *line_width += pkgi_text_width_ttf(text);
+        *length = 0;
+    }
 }
 
 int pkgi_text_width_ttf(const char* text)
 {
-    return (display_ttf_string(0, 0, text, 0, 0, PKGI_FONT_WIDTH+6, PKGI_FONT_HEIGHT+2));
+    if (!text)
+        return 0;
+
+    float old_y = Y_ttf;
+    float old_z = Z_ttf;
+    set_ttf_window(0, 0, VITA_WIDTH, VITA_HEIGHT, 0);
+    int width = display_ttf_string(0, 0, text, 0, 0,
+                                   PKGI_TTF_CELL_WIDTH,
+                                   PKGI_TTF_LINE_HEIGHT);
+    pkgi_apply_text_window();
+    Y_ttf = old_y;
+    Z_ttf = old_z;
+    return width;
 }
-
-
-void pkgi_draw_text(int x, int y, uint32_t color, const char* text)
-{
-    SetFontColor(RGBA_COLOR(PKGI_COLOR_TEXT_SHADOW, 128), 0);
-    DrawString((float)x+PKGI_FONT_SHADOW, (float)y+PKGI_FONT_SHADOW, (char *)text);
-
-    SetFontColor(RGBA_COLOR(color, 200), 0);
-    DrawString((float)x, (float)y, (char *)text);
-}
-
 
 int pkgi_text_width(const char* text)
 {
-    return (strlen(text) * PKGI_FONT_WIDTH) + PKGI_FONT_SHADOW;
+    if (!text)
+        return 0;
+
+    char segment[256];
+    uint32_t segment_length = 0;
+    int line_width = 0;
+    int max_width = 0;
+
+    const unsigned char* p = (const unsigned char*)text;
+    while (*p)
+    {
+        if (*p == '\r' || *p == '\n')
+        {
+            pkgi_measure_flush(segment, &segment_length, &line_width);
+            if (line_width > max_width)
+                max_width = line_width;
+            line_width = 0;
+            if (*p == '\r' && p[1] == '\n')
+                p++;
+            p++;
+            continue;
+        }
+
+        if (pkgi_text_icon(*p))
+        {
+            pkgi_measure_flush(segment, &segment_length, &line_width);
+            line_width += PKGI_TTF_CELL_WIDTH;
+            p++;
+            continue;
+        }
+
+        int char_size = pkgi_utf8_char_size(p);
+        if (segment_length + char_size >= sizeof(segment))
+            pkgi_measure_flush(segment, &segment_length, &line_width);
+
+        for (int i = 0; i < char_size; i++)
+            segment[segment_length++] = (char)p[i];
+        p += char_size;
+    }
+
+    pkgi_measure_flush(segment, &segment_length, &line_width);
+    return line_width > max_width ? line_width : max_width;
+}
+
+static void pkgi_draw_ttf_run(int x, int y, int z, uint32_t color,
+                              const char* text, int shadow)
+{
+    int local_x = x - text_clip_x;
+    int local_y = y - text_clip_y;
+    set_ttf_window(text_clip_x, text_clip_y, text_clip_w, text_clip_h, 0);
+    Z_ttf = z;
+
+    if (shadow)
+    {
+        display_ttf_string(local_x + PKGI_FONT_SHADOW,
+                           local_y + PKGI_FONT_SHADOW, text,
+                           RGBA_COLOR(PKGI_COLOR_TEXT_SHADOW, 128), 0,
+                           PKGI_TTF_CELL_WIDTH, PKGI_TTF_LINE_HEIGHT);
+    }
+    display_ttf_string(local_x, local_y, text, RGBA_COLOR(color, 255), 0,
+                       PKGI_TTF_CELL_WIDTH, PKGI_TTF_LINE_HEIGHT);
+    pkgi_apply_text_window();
+}
+
+static void pkgi_draw_text_icon(int x, int y, int z, uint32_t color,
+                                unsigned char ch)
+{
+    switch (ch)
+    {
+    case 0xfa:
+        if (tex_buttons.circle) pkgi_draw_texture_z(tex_buttons.circle, x, y, z, 0.5f);
+        break;
+    case 0xfb:
+        if (tex_buttons.cross) pkgi_draw_texture_z(tex_buttons.cross, x, y, z, 0.5f);
+        break;
+    case 0xfc:
+        if (tex_buttons.triangle) pkgi_draw_texture_z(tex_buttons.triangle, x, y, z, 0.5f);
+        break;
+    case 0xfd:
+        if (tex_buttons.square) pkgi_draw_texture_z(tex_buttons.square, x, y, z, 0.5f);
+        break;
+    default:
+        SetFontColor(RGBA_COLOR(color, 255), 0);
+        DrawChar(x, y, z, ch);
+        break;
+    }
+}
+
+static int pkgi_draw_next_line(int* x, int* y, int line_x)
+{
+    *x = line_x;
+    *y += PKGI_TTF_LINE_HEIGHT;
+    return *y + PKGI_TTF_LINE_HEIGHT <= text_clip_y + text_clip_h;
+}
+
+static void pkgi_draw_rich_text(int x, int y, int z, uint32_t color,
+                                const char* text, int shadow)
+{
+    if (!text || text_clip_w <= 0 || text_clip_h <= 0)
+        return;
+
+    int left = text_clip_x;
+    int right = text_clip_x + text_clip_w;
+    int bottom = text_clip_y + text_clip_h;
+    int wrap = text_clip_h >= 2 * PKGI_TTF_LINE_HEIGHT;
+    int line_x = x;
+
+    if (line_x < left || line_x >= right)
+        line_x = left;
+    else if (wrap && pkgi_text_width(text) > right - line_x)
+        line_x = left;
+
+    int cursor_x = line_x;
+    int cursor_y = y < text_clip_y ? text_clip_y : y;
+    const unsigned char* p = (const unsigned char*)text;
+
+    while (*p && cursor_y + PKGI_TTF_LINE_HEIGHT <= bottom)
+    {
+        if (*p == '\r' || *p == '\n')
+        {
+            if (*p == '\r' && p[1] == '\n')
+                p++;
+            p++;
+            if (!pkgi_draw_next_line(&cursor_x, &cursor_y, line_x))
+                break;
+            continue;
+        }
+
+        if (pkgi_text_icon(*p))
+        {
+            if (cursor_x > line_x &&
+                cursor_x + PKGI_TTF_CELL_WIDTH > right)
+            {
+                if (!wrap)
+                {
+                    p++;
+                    continue;
+                }
+                if (!pkgi_draw_next_line(&cursor_x, &cursor_y, line_x))
+                    break;
+            }
+            if (cursor_x + PKGI_TTF_CELL_WIDTH <= right)
+                pkgi_draw_text_icon(cursor_x, cursor_y, z, color, *p);
+            cursor_x += PKGI_TTF_CELL_WIDTH;
+            p++;
+            continue;
+        }
+
+        if (*p == ' ')
+        {
+            int space_width = pkgi_text_width_ttf(" ");
+            p++;
+            if (cursor_x == line_x)
+                continue;
+            if (cursor_x + space_width > right)
+            {
+                if (wrap && !pkgi_draw_next_line(&cursor_x, &cursor_y, line_x))
+                    break;
+                continue;
+            }
+            cursor_x += space_width;
+            continue;
+        }
+
+        char word[256];
+        uint32_t word_length = 0;
+        while (*p && *p != ' ' && *p != '\r' && *p != '\n' &&
+               !pkgi_text_icon(*p))
+        {
+            int char_size = pkgi_utf8_char_size(p);
+            if (word_length + char_size >= sizeof(word))
+                break;
+            for (int i = 0; i < char_size; i++)
+                word[word_length++] = (char)p[i];
+            p += char_size;
+        }
+
+        if (word_length == 0)
+        {
+            p++;
+            continue;
+        }
+        word[word_length] = 0;
+
+        int word_width = pkgi_text_width_ttf(word);
+        if (cursor_x > line_x && cursor_x + word_width > right)
+        {
+            if (wrap && !pkgi_draw_next_line(&cursor_x, &cursor_y, line_x))
+                break;
+        }
+
+        if (cursor_x + word_width <= right)
+        {
+            pkgi_draw_ttf_run(cursor_x, cursor_y, z, color, word, shadow);
+            cursor_x += word_width;
+            continue;
+        }
+
+        if (!wrap)
+        {
+            pkgi_draw_ttf_run(cursor_x, cursor_y, z, color, word, shadow);
+            cursor_x += word_width;
+            continue;
+        }
+
+        /* Break a single overlong word at UTF-8 character boundaries. */
+        const unsigned char* unit = (const unsigned char*)word;
+        while (*unit && cursor_y + PKGI_TTF_LINE_HEIGHT <= bottom)
+        {
+            int char_size = pkgi_utf8_char_size(unit);
+            char glyph[5];
+            for (int i = 0; i < char_size; i++)
+                glyph[i] = (char)unit[i];
+            glyph[char_size] = 0;
+
+            int glyph_width = pkgi_text_width_ttf(glyph);
+            if (cursor_x > line_x && cursor_x + glyph_width > right)
+            {
+                if (!pkgi_draw_next_line(&cursor_x, &cursor_y, line_x))
+                    break;
+            }
+            if (cursor_x + glyph_width > right)
+                break;
+
+            pkgi_draw_ttf_run(cursor_x, cursor_y, z, color, glyph, shadow);
+            cursor_x += glyph_width;
+            unit += char_size;
+        }
+    }
+}
+
+void pkgi_draw_text_z(int x, int y, int z, uint32_t color, const char* text)
+{
+    pkgi_draw_rich_text(x, y, z, color, text, 0);
+}
+
+void pkgi_draw_text_ttf(int x, int y, int z, uint32_t color, const char* text)
+{
+    pkgi_draw_rich_text(x, y, z, color, text, 1);
+}
+
+void pkgi_draw_text(int x, int y, uint32_t color, const char* text)
+{
+    pkgi_draw_rich_text(x, y, PKGI_FONT_Z, color, text, 1);
 }
 
 int pkgi_text_height(const char* text)

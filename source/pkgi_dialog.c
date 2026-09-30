@@ -292,7 +292,9 @@ void pkgi_do_dialog(pkgi_input* input)
         if (width > w + 2 * PKGI_DIALOG_PADDING)
         {
             pkgi_clip_set(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, PKGI_DIALOG_VMARGIN + font_height, w - 2 * PKGI_DIALOG_PADDING, h - 2 * PKGI_DIALOG_PADDING);
-            pkgi_draw_text_ttf(0, 0, PKGI_DIALOG_TEXT_Z, color, local_title);
+            pkgi_draw_text_ttf(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING,
+                               PKGI_DIALOG_VMARGIN + font_height,
+                               PKGI_DIALOG_TEXT_Z, color, local_title);
             pkgi_clip_remove();
         }
         else
