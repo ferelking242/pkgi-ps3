@@ -238,6 +238,37 @@ void pkgi_dialog_close(void)
     dialog_delta = -1;
 }
 
+static void pkgi_draw_rounded_fill_z(int x, int y, int z, int width, int height,
+                                     int radius, uint32_t color)
+{
+    if (width <= 0 || height <= 0)
+        return;
+
+    if (radius <= 0)
+    {
+        pkgi_draw_fill_rect_z(x, y, z, width, height, color);
+        return;
+    }
+
+    if (radius * 2 > width)
+        radius = width / 2;
+    if (radius * 2 > height)
+        radius = height / 2;
+
+    for (int row = 0; row < radius; row++)
+    {
+        int remaining = radius - row;
+        int inset = (remaining * remaining * 3) / (4 * radius);
+        int row_width = width - inset * 2;
+
+        pkgi_draw_fill_rect_z(x + inset, y + row, z, row_width, 1, color);
+        pkgi_draw_fill_rect_z(x + inset, y + height - row - 1, z, row_width, 1, color);
+    }
+
+    if (height > radius * 2)
+        pkgi_draw_fill_rect_z(x, y + radius, z, width, height - radius * 2, color);
+}
+
 void pkgi_do_dialog(pkgi_input* input)
 {
     pkgi_dialog_lock();
@@ -366,9 +397,12 @@ void pkgi_do_dialog(pkgi_input* input)
     {
         int x = (VITA_WIDTH - local_width) / 2;
         int y = (VITA_HEIGHT - local_height) / 2;
-        pkgi_draw_fill_rect_z(x + 4, y + 6, PKGI_MENU_Z - 2, local_width, local_height, PKGI_COLOR_DIALOG_SHADOW);
-        pkgi_draw_fill_rect_z(x, y, PKGI_MENU_Z - 1, local_width, local_height, PKGI_COLOR_DIALOG_EDGE);
-        pkgi_draw_fill_rect_z(x + 2, y + 2, PKGI_MENU_Z, local_width - 4, local_height - 4, PKGI_COLOR_DIALOG_SURFACE);
+        pkgi_draw_rounded_fill_z(x + 4, y + 6, PKGI_MENU_Z - 2,
+                                 local_width, local_height, 14, PKGI_COLOR_DIALOG_SHADOW);
+        pkgi_draw_rounded_fill_z(x, y, PKGI_MENU_Z - 1,
+                                 local_width, local_height, 12, PKGI_COLOR_DIALOG_EDGE);
+        pkgi_draw_rounded_fill_z(x + 2, y + 2, PKGI_MENU_Z,
+                                 local_width - 4, local_height - 4, 10, PKGI_COLOR_DIALOG_SURFACE);
         pkgi_draw_fill_rect_z(x + 10, y + 10, PKGI_MENU_Z, 3, local_height - 20, PKGI_COLOR_ACCENT);
     }
 
