@@ -255,6 +255,7 @@ static int load_database(uint8_t db_id)
 {
     uint8_t column = 0;
     dbFormat dbf = { ',', 8, (ColumnType*)default_format, entries };
+    ColumnType header_types[MAX_DB_COLUMNS];
     int used_config_format = 0;
 
     char path[256];
@@ -268,7 +269,6 @@ static int load_database(uint8_t db_id)
         char* ptr = db_data;
         char* end = db_data + loaded + 1;
         column = 0;
-        ColumnType types[MAX_DB_COLUMNS];
 
         LOG("loading format from %s", path);
 
@@ -291,14 +291,14 @@ static int load_database(uint8_t db_id)
             }
             if (ptr < end)
                 *ptr++ = 0;
-            types[column] = column_type_from_header(column_name);
+            header_types[column] = column_type_from_header(column_name);
             column++;
 
             if (ptr < end && (*ptr == '\r' || *ptr == '\n'))
                 break;
         }
         dbf.total_columns = column;
-        dbf.type = types;
+        dbf.type = header_types;
     }
     else if (g_config_db_format[0] != 0)
     {

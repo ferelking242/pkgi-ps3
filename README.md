@@ -28,6 +28,9 @@ Sans `config.txt`, l'app démarre avec les **URLs NPS par défaut**
 (games/dlcs/themes/avatars/demos), téléchargement en arrière-plan activé, musique coupée.
 Le paquet d'installation inclut maintenant les fichiers `config.txt` et `dbformat.txt`
 fournis avec le projet dans `USRDIR`.
+Au premier démarrage, si aucune base locale (`pkgi_games.txt`, etc.) n'est disponible,
+l'application télécharge les bases depuis les URL configurées. Les démarrages suivants
+réutilisent les fichiers locaux et ne rafraîchissent pas le réseau automatiquement.
 
 Clé nouvelle : `db_format_<tag> = nps | pkgi` (par type de contenu).
 

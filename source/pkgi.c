@@ -58,9 +58,26 @@ static void pkgi_refresh_thread(void)
 {
     LOG("starting update");
 
-    if (pkgi_menu_result() == MenuResultRefresh)
+    int refresh_requested = pkgi_menu_result() == MenuResultRefresh;
+
+    /* Keep using the local cache on normal starts. On a fresh install (or
+     * when the cache cannot be parsed), fetch the configured databases once
+     * instead of leaving the user at an empty catalogue until manual refresh. */
+    if (!refresh_requested &&
+        pkgi_db_reload(error_state, sizeof(error_state)))
     {
-        pkgi_db_update((char*) &refresh_url, sizeof(refresh_url[0]), error_state, sizeof(error_state));
+        first_item = 0;
+        selected_item = 0;
+        state = StateUpdateDone;
+        pkgi_thread_exit();
+    }
+
+    if (config.allow_refresh)
+    {
+        LOG(refresh_requested ? "manual database refresh" :
+            "no usable local database; downloading configured databases");
+        pkgi_db_update((char*) &refresh_url, sizeof(refresh_url[0]),
+                       error_state, sizeof(error_state));
     }
 
     if (pkgi_db_reload(error_state, sizeof(error_state)))
