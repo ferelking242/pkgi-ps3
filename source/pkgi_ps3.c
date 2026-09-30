@@ -1409,9 +1409,9 @@ void pkgi_curl_init(CURL *curl)
 
     // Set user agent string
     curl_easy_setopt(curl, CURLOPT_USERAGENT, PKGI_USER_AGENT);
-    /* Larger receive buffers reduce callback overhead on slower PS3 links.
-     * The server and connection remain the ultimate throughput limits. */
-    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 64L * 1024L);
+    /* Larger receive buffers reduce callback and per-chunk processing overhead
+     * on slower PS3 hardware. This cannot exceed the server or link's capacity. */
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 256L * 1024L);
     curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     // don't verify the certificate's name against host

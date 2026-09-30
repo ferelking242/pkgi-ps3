@@ -55,6 +55,11 @@ jaquette » propre), overlay sombre pour la lisibilité, et toutes les données
 disponibles : Title ID, région, taille localisée, date de mise à jour, RAP/SHA256.
 Seuls les champs réellement présents dans la base sont affichés — rien n'est inventé.
 
+Le fond de la sélection et l’image de la fiche privilégient `PIC1.PNG` / `PIC0.PNG`
+du jeu installé. Si ces ressources locales n’existent pas, l’application utilise la
+jaquette TMDB en cache. Les bases NPS ne fournissant pas de vraies captures, aucune
+capture de gameplay n’est fabriquée ni présentée comme telle.
+
 ### 🇫🇷 Français complet
 `LANG/fr.po` étendu et corrigé (menus, erreurs, téléchargements, configuration).
 

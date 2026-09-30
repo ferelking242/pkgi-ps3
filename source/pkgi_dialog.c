@@ -27,6 +27,9 @@ static int dialog_cancelled;
 static int dialog_background;
 static int details_install_requested;
 static pkgi_texture pkg_icon = NULL;
+static float pkg_icon_scale = 0.5f;
+static int pkg_icon_draw_width = 160;
+static int pkg_icon_draw_height = 88;
 static DbItem* db_item = NULL;
 static pkgi_dialog_callback_t dialog_callback = NULL;
 
@@ -36,6 +39,23 @@ static int32_t dialog_delta;
 
 volatile int msg_dialog_action = 0;
 
+static pkgi_texture pkgi_load_local_game_image(const char* content, const char* filename)
+{
+    char path[256];
+    pkgi_snprintf(path, sizeof(path), "/dev_hdd0/game/%.9s/%s",
+                  content + 7, filename);
+    if (pkgi_get_size(path) <= 0)
+        return NULL;
+
+    return pkgi_load_png_file(path);
+}
+
+static void pkgi_set_game_image_metrics(float scale, int width, int height)
+{
+    pkg_icon_scale = scale;
+    pkg_icon_draw_width = width;
+    pkg_icon_draw_height = height;
+}
 
 void pkgi_dialog_init(void)
 {
@@ -118,9 +138,29 @@ void pkgi_dialog_details(DbItem *item, const char* content_type)
 {
     pkgi_dialog_lock();
 
-    pkgi_snprintf(dialog_extra, sizeof(dialog_extra), PKGI_TMP_FOLDER "/%.9s.PNG", item->content + 7);
-    if (!pkg_icon && pkgi_get_size(dialog_extra)) 
-        pkg_icon = pkgi_load_png_file(dialog_extra);
+    pkgi_set_game_image_metrics(0.5f, 160, 88);
+    if (!pkg_icon)
+    {
+        pkg_icon = pkgi_load_local_game_image(item->content, "PIC0.PNG");
+        if (pkg_icon)
+            pkgi_set_game_image_metrics(0.16f, 160, 90);
+
+        if (!pkg_icon)
+        {
+            pkg_icon = pkgi_load_local_game_image(item->content, "PIC1.PNG");
+            if (pkg_icon)
+                pkgi_set_game_image_metrics(0.08f, 154, 86);
+        }
+
+        if (!pkg_icon)
+        {
+            char icon_path[128];
+            pkgi_snprintf(icon_path, sizeof(icon_path),
+                          PKGI_TMP_FOLDER "/%.9s.PNG", item->content + 7);
+            if (pkgi_get_size(icon_path) > 0)
+                pkg_icon = pkgi_load_png_file(icon_path);
+        }
+    }
 
     /* PKGi Remastered: build the full info sheet from available data.
      * Only fields actually present in the database row are shown. */
@@ -363,11 +403,25 @@ void pkgi_do_dialog(pkgi_input* input)
 
     if (dialog_type == DialogDetails && !pkg_icon && db_item)
     {
-        char icon_path[128];
-        pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
-                      db_item->content + 7);
-        if (pkgi_get_size(icon_path) > 0)
-            pkg_icon = pkgi_load_png_file(icon_path);
+        pkg_icon = pkgi_load_local_game_image(db_item->content, "PIC0.PNG");
+        if (pkg_icon)
+            pkgi_set_game_image_metrics(0.16f, 160, 90);
+
+        if (!pkg_icon)
+        {
+            pkg_icon = pkgi_load_local_game_image(db_item->content, "PIC1.PNG");
+            if (pkg_icon)
+                pkgi_set_game_image_metrics(0.08f, 154, 86);
+        }
+
+        if (!pkg_icon)
+        {
+            char icon_path[128];
+            pkgi_snprintf(icon_path, sizeof(icon_path),
+                          PKGI_TMP_FOLDER "/%.9s.PNG", db_item->content + 7);
+            if (pkgi_get_size(icon_path) > 0)
+                pkg_icon = pkgi_load_png_file(icon_path);
+        }
     }
 
     DialogType local_type = dialog_type;
@@ -514,7 +568,12 @@ void pkgi_do_dialog(pkgi_input* input)
 
         if (pkg_icon)
         {
-            pkgi_draw_texture_z(pkg_icon, cover_x, cover_y, PKGI_DIALOG_TEXT_Z, 0.5f);
+            int image_x = cover_x + (cover_w - pkg_icon_draw_width) / 2;
+            int image_y = cover_y + (cover_h - pkg_icon_draw_height) / 2;
+            pkgi_clip_set(cover_x, cover_y, cover_w, cover_h);
+            pkgi_draw_texture_z(pkg_icon, image_x, image_y,
+                                PKGI_DIALOG_TEXT_Z, pkg_icon_scale);
+            pkgi_clip_remove();
         }
         else
         {

@@ -429,6 +429,17 @@ static pkgi_texture pkgi_get_thumbnail(const DbItem* item, uint32_t slot)
     return thumbnail->texture;
 }
 
+static pkgi_texture pkgi_load_local_game_art(const char* content, const char* filename)
+{
+    char path[256];
+    pkgi_snprintf(path, sizeof(path), "/dev_hdd0/game/%.9s/%s",
+                  content + 7, filename);
+    if (pkgi_get_size(path) <= 0)
+        return NULL;
+
+    return pkgi_load_png_file(path);
+}
+
 static pkgi_texture pkgi_get_background_cover(const DbItem* item)
 {
     if (!item)
@@ -445,11 +456,20 @@ static pkgi_texture pkgi_get_background_cover(const DbItem* item)
 
     if (!background_cover)
     {
-        char icon_path[128];
-        pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
-                      item->content + 7);
-        if (pkgi_get_size(icon_path) > 0)
-            background_cover = pkgi_load_png_file(icon_path);
+        /* Installed PS3 titles may include their own full-screen artwork.
+         * Prefer it to the small XMB icon, then fall back to the cached cover. */
+        background_cover = pkgi_load_local_game_art(item->content, "PIC1.PNG");
+        if (!background_cover)
+            background_cover = pkgi_load_local_game_art(item->content, "PIC0.PNG");
+
+        if (!background_cover)
+        {
+            char icon_path[128];
+            pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
+                          item->content + 7);
+            if (pkgi_get_size(icon_path) > 0)
+                background_cover = pkgi_load_png_file(icon_path);
+        }
     }
 
     return background_cover;
