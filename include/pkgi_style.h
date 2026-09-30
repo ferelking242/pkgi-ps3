@@ -51,6 +51,7 @@
 #define PKGI_COLOR_DIALOG_SURFACE       PKGI_COLOR(24, 31, 42)
 #define PKGI_COLOR_DIALOG_INNER         PKGI_COLOR(34, 43, 56)
 #define PKGI_COLOR_DIALOG_SHADOW        PKGI_COLOR(5, 8, 14)
+#define PKGI_COLOR_ART_TINT             PKGI_COLOR(6, 10, 20)
 
 /* PKGi Remastered */
 #define PKGI_COLOR_OVERLAY              RGBA_COLOR(0x10, 0xA0)  /* dark translucent */

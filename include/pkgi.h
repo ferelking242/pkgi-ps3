@@ -153,6 +153,8 @@ void pkgi_draw_rect(int x, int y, int w, int h, uint32_t color);
 void pkgi_draw_rect_z(int x, int y, int z, int w, int h, uint32_t color);
 void pkgi_draw_fill_rect(int x, int y, int w, int h, uint32_t color);
 void pkgi_draw_fill_rect_z(int x, int y, int z, int w, int h, uint32_t color);
+void pkgi_draw_fill_rect_alpha_z(int x, int y, int z, int w, int h,
+                                 uint32_t color, uint8_t alpha);
 void pkgi_draw_text(int x, int y, uint32_t color, const char* text);
 void pkgi_draw_text_z(int x, int y, int z, uint32_t color, const char* text);
 void pkgi_draw_text_ttf(int x, int y, int z, uint32_t color, const char* text);

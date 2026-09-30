@@ -25,6 +25,7 @@ static float dialog_progress;
 static int dialog_allow_close;
 static int dialog_cancelled;
 static int dialog_background;
+static int details_install_requested;
 static pkgi_texture pkg_icon = NULL;
 static DbItem* db_item = NULL;
 static pkgi_dialog_callback_t dialog_callback = NULL;
@@ -41,6 +42,7 @@ void pkgi_dialog_init(void)
     dialog_type = DialogNone;
     dialog_allow_close = 1;
     dialog_background = 0;
+    details_install_requested = 0;
 }
 
 int pkgi_dialog_is_open(void)
@@ -80,6 +82,16 @@ void pkgi_dialog_restore_background(void)
     pkgi_dialog_unlock();
 }
 
+int pkgi_dialog_take_details_install(void)
+{
+    int requested;
+    pkgi_dialog_lock();
+    requested = details_install_requested;
+    details_install_requested = 0;
+    pkgi_dialog_unlock();
+    return requested;
+}
+
 void pkgi_dialog_allow_close(int allow)
 {
     pkgi_dialog_lock();
@@ -97,6 +109,7 @@ void pkgi_dialog_data_init(DialogType type, const char* title, const char* text)
 
     dialog_cancelled = 0;
     dialog_background = 0;
+    details_install_requested = 0;
     dialog_type = type;
     dialog_delta = 1;
 }
@@ -231,7 +244,16 @@ void pkgi_do_dialog(pkgi_input* input)
 
     if (dialog_allow_close)
     {
-        if ((dialog_type == DialogMessage || dialog_type == DialogError || dialog_type == DialogDetails) && (input->pressed & pkgi_ok_button()))
+        if ((dialog_type == DialogMessage || dialog_type == DialogError) && (input->pressed & pkgi_ok_button()))
+        {
+            dialog_delta = -1;
+        }
+        else if (dialog_type == DialogDetails && (input->pressed & pkgi_ok_button()))
+        {
+            details_install_requested = 1;
+            dialog_delta = -1;
+        }
+        else if (dialog_type == DialogDetails && (input->pressed & pkgi_cancel_button()))
         {
             dialog_delta = -1;
         }
@@ -306,6 +328,15 @@ void pkgi_do_dialog(pkgi_input* input)
             dialog_width = min32(dialog_width, PKGI_DIALOG_WIDTH);
             dialog_height = min32(dialog_height, PKGI_DIALOG_HEIGHT);
         }
+    }
+
+    if (dialog_type == DialogDetails && !pkg_icon && db_item)
+    {
+        char icon_path[128];
+        pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
+                      db_item->content + 7);
+        if (pkgi_get_size(icon_path) > 0)
+            pkg_icon = pkgi_load_png_file(icon_path);
     }
 
     DialogType local_type = dialog_type;
@@ -476,7 +507,10 @@ void pkgi_do_dialog(pkgi_input* input)
         if (local_allow_close)
         {
             char text[256];
-            pkgi_snprintf(text, sizeof(text), _("press %s to close - %s to scan updates"), pkgi_ok_button() == PKGI_BUTTON_X ? PKGI_UTF8_X : PKGI_UTF8_O, PKGI_UTF8_S);
+            pkgi_snprintf(text, sizeof(text), _("%s install  %s back  %s updates"),
+                          pkgi_ok_button() == PKGI_BUTTON_X ? PKGI_UTF8_X : PKGI_UTF8_O,
+                          pkgi_cancel_button() == PKGI_BUTTON_O ? PKGI_UTF8_O : PKGI_UTF8_X,
+                          PKGI_UTF8_S);
             pkgi_draw_text_z((VITA_WIDTH - pkgi_text_width(text)) / 2, PKGI_DIALOG_VMARGIN + h - 2 * font_height, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, text);
         }
     }

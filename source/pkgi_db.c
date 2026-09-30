@@ -502,15 +502,16 @@ static void swap(uint32_t a, uint32_t b)
     db_item[b] = temp;
 }
 
-static int matches(GameRegion region, ContentType content, uint32_t filter)
+static int matches(GameRegion region, DbItem* item, uint32_t filter)
 {
-    return ((region == RegionASA && (filter & DbFilterRegionASA))
+    int matches_region = ((region == RegionASA && (filter & DbFilterRegionASA))
         || (region == RegionEUR && (filter & DbFilterRegionEUR))
         || (region == RegionJPN && (filter & DbFilterRegionJPN))
         || (region == RegionUSA && (filter & DbFilterRegionUSA))
-        || (region == RegionUnknown))
+        || (region == RegionUnknown));
 
-        && ((content == ContentGame && (filter & DbFilterContentGame))
+    ContentType content = item->type;
+    int matches_content = ((content == ContentGame && (filter & DbFilterContentGame))
         || (content == ContentDLC && (filter & DbFilterContentDLC))
         || (content == ContentTheme && (filter & DbFilterContentTheme))
         || (content == ContentAvatar && (filter & DbFilterContentAvatar))
@@ -520,6 +521,22 @@ static int matches(GameRegion region, ContentType content, uint32_t filter)
         || (content == ContentApp && (filter & DbFilterContentApp))
         || (content == ContentTool && (filter & DbFilterContentTool))
         || (content == ContentUnknown));
+
+    if (!matches_region || !matches_content)
+        return 0;
+
+    uint32_t status_filter = filter & (DbFilterInstalled | DbFilterMissing);
+    if (status_filter == (DbFilterInstalled | DbFilterMissing))
+        return 1;
+
+    if (item->presence == PresenceUnknown)
+    {
+        item->presence = pkgi_is_incomplete(item->content) ? PresenceIncomplete :
+            pkgi_is_installed(item->content) ? PresenceInstalled : PresenceMissing;
+    }
+
+    return (item->presence == PresenceInstalled && (status_filter & DbFilterInstalled)) ||
+           (item->presence != PresenceInstalled && (status_filter & DbFilterMissing));
 }
 
 static int lower(const DbItem* a, const DbItem* b, DbSort sort, DbSortOrder order, uint32_t filter)
@@ -545,8 +562,8 @@ static int lower(const DbItem* a, const DbItem* b, DbSort sort, DbSortOrder orde
         cmp = a->size < b->size;
     }
 
-    int matches_a = matches(reg_a, a->type, filter);
-    int matches_b = matches(reg_b, b->type, filter);
+    int matches_a = matches(reg_a, (DbItem*)a, filter);
+    int matches_b = matches(reg_b, (DbItem*)b, filter);
 
     if (matches_a == matches_b)
     {
@@ -597,7 +614,8 @@ void pkgi_db_configure(const char* search, const Config* config)
         uint32_t write = 0;
         for (uint32_t read = 0; read < db_count; read++)
         {
-            if (pkgi_stricontains(db_item[read]->name, search))
+            if (pkgi_stricontains(db_item[read]->name, search) ||
+                pkgi_stricontains(db_item[read]->content, search))
             {
                 if (write < read)
                 {
@@ -640,7 +658,7 @@ void pkgi_db_configure(const char* search, const Config* config)
             uint32_t middle = (low + high) / 2;
 
             GameRegion region = pkgi_get_region(db_item[middle]->content);
-            if (matches(region, db_item[middle]->type, config->filter))
+            if (matches(region, db_item[middle], config->filter))
             {
                 low = middle + 1;
             }

@@ -1071,6 +1071,12 @@ void pkgi_draw_fill_rect_z(int x, int y, int z, int w, int h, uint32_t color)
     ya2d_drawFillRectZ(x, y, z, w, h, RGBA_COLOR(color, 255));
 }
 
+void pkgi_draw_fill_rect_alpha_z(int x, int y, int z, int w, int h,
+                                 uint32_t color, uint8_t alpha)
+{
+    ya2d_drawFillRectZ(x, y, z, w, h, RGBA_COLOR(color, alpha));
+}
+
 void pkgi_draw_rect_z(int x, int y, int z, int w, int h, uint32_t color)
 {
 	ya2d_drawRectZ(x, y, z, w, h, RGBA_COLOR(color, 255));

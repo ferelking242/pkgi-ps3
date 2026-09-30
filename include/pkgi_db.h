@@ -29,7 +29,6 @@ typedef enum {
     DbFilterRegionJPN = 0x04,
     DbFilterRegionUSA = 0x08,
 
-    // TODO: implement these two
     DbFilterInstalled = 0x10,
     DbFilterMissing   = 0x20,
 
@@ -95,6 +94,7 @@ typedef struct Config {
     uint8_t dl_mode_background;
     uint8_t music;
     uint8_t allow_refresh;
+    uint8_t grid_mode;
     char language[3];
     char download_folder[128]; /* custom temp dir (PKGi Remastered) */
 } Config;

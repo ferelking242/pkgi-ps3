@@ -62,9 +62,11 @@ static DbSortOrder parse_order(const char* value, DbSortOrder order)
     }
 }
 
-static DbSortOrder parse_filter(char* value, uint32_t filter)
+static uint32_t parse_filter(char* value, uint32_t filter)
 {
     uint32_t result = 0;
+    int saw_content = 0;
+    int saw_status = 0;
 
     char* start = value;
     for (;;)
@@ -89,6 +91,69 @@ static DbSortOrder parse_filter(char* value, uint32_t filter)
             {
                 result |= DbFilterRegionUSA;
             }
+            else if (pkgi_stricmp(start, "GAMES") == 0)
+            {
+                result |= DbFilterContentGame;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "DLCS") == 0)
+            {
+                result |= DbFilterContentDLC;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "THEMES") == 0)
+            {
+                result |= DbFilterContentTheme;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "AVATARS") == 0)
+            {
+                result |= DbFilterContentAvatar;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "DEMOS") == 0)
+            {
+                result |= DbFilterContentDemo;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "UPDATES") == 0)
+            {
+                result |= DbFilterContentUpdate;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "EMULATORS") == 0)
+            {
+                result |= DbFilterContentEmulator;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "APPS") == 0)
+            {
+                result |= DbFilterContentApp;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "TOOLS") == 0)
+            {
+                result |= DbFilterContentTool;
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "NO_CONTENT") == 0)
+            {
+                saw_content = 1;
+            }
+            else if (pkgi_stricmp(start, "INSTALLED") == 0)
+            {
+                result |= DbFilterInstalled;
+                saw_status = 1;
+            }
+            else if (pkgi_stricmp(start, "MISSING") == 0)
+            {
+                result |= DbFilterMissing;
+                saw_status = 1;
+            }
+            else if (pkgi_stricmp(start, "NO_STATUS") == 0)
+            {
+                saw_status = 1;
+            }
             else
             {
                 return filter;
@@ -106,6 +171,12 @@ static DbSortOrder parse_filter(char* value, uint32_t filter)
         }
     }
 
+    /* Older config files serialized only region filters. Preserve their
+     * historical meaning by treating omitted content/status sets as "all". */
+    if (!saw_content)
+        result |= DbFilterAllContent;
+    if (!saw_status)
+        result |= DbFilterInstalled | DbFilterMissing;
     return result;
 }
 
@@ -120,6 +191,7 @@ void pkgi_load_config(Config* config, char* refresh_url, uint32_t refresh_len)
     config->music = 1;
     config->content = 0;
     config->allow_refresh = 0;
+    config->grid_mode = 0;
     config->download_folder[0] = 0;
     pkgi_strncpy(config->language, 3, pkgi_get_user_language());
 
@@ -208,6 +280,10 @@ void pkgi_load_config(Config* config, char* refresh_url, uint32_t refresh_len)
             {
                 config->content = (uint8_t)pkgi_strtoll(value);
             }
+            else if (pkgi_stricmp(key, "layout") == 0)
+            {
+                config->grid_mode = pkgi_stricmp(value, "grid") == 0;
+            }
             else if (pkgi_stricmp(key, "language") == 0)
             {
                 pkgi_strncpy(config->language, 2, value);
@@ -246,19 +322,11 @@ void pkgi_load_config(Config* config, char* refresh_url, uint32_t refresh_len)
             }
         }
 
-        config->filter = DbFilterAllRegions | DbFilterAllContent;
+        config->filter = DbFilterAll;
         config->dl_mode_background = 1;
         config->music = 0;
 
         LOG("no config.txt, using NPS default URLs");
-    }
-    if (config->content == 0)
-    {
-        config->filter |= DbFilterAllContent;
-    }
-    else
-    {
-        config->filter |= (128 << config->content);
     }
 }
 
@@ -417,6 +485,16 @@ int pkgi_config_load_profile(const char* name, Config* config,
             else
                 parsed.content = (uint8_t)c;
         }
+        else if (pkgi_stricmp(key, "layout") == 0)
+        {
+            known_key = 1;
+            if (pkgi_stricmp(value, "grid") == 0)
+                parsed.grid_mode = 1;
+            else if (pkgi_stricmp(value, "list") == 0)
+                parsed.grid_mode = 0;
+            else
+                saw_error = 1;
+        }
         else if (pkgi_stricmp(key, "dl_mode_background") == 0)
         {
             known_key = 1;
@@ -528,28 +606,41 @@ void pkgi_save_config(const Config* config, const char* update_url, uint32_t upd
     len += pkgi_snprintf(data + len, sizeof(data) - len, "order %s\n", order_str(config->order));
     len += pkgi_snprintf(data + len, sizeof(data) - len, "filter ");
     const char* sep = "";
-    if (config->filter & DbFilterRegionASA)
+#define SAVE_FILTER(bit, name) \
+    do { if (config->filter & (bit)) { \
+        len += pkgi_snprintf(data + len, sizeof(data) - len, "%s%s", sep, (name)); \
+        sep = ","; \
+    } } while (0)
+    SAVE_FILTER(DbFilterRegionASA, "ASA");
+    SAVE_FILTER(DbFilterRegionEUR, "EUR");
+    SAVE_FILTER(DbFilterRegionJPN, "JPN");
+    SAVE_FILTER(DbFilterRegionUSA, "USA");
+    SAVE_FILTER(DbFilterContentGame, "GAMES");
+    SAVE_FILTER(DbFilterContentDLC, "DLCS");
+    SAVE_FILTER(DbFilterContentTheme, "THEMES");
+    SAVE_FILTER(DbFilterContentAvatar, "AVATARS");
+    SAVE_FILTER(DbFilterContentDemo, "DEMOS");
+    SAVE_FILTER(DbFilterContentUpdate, "UPDATES");
+    SAVE_FILTER(DbFilterContentEmulator, "EMULATORS");
+    SAVE_FILTER(DbFilterContentApp, "APPS");
+    SAVE_FILTER(DbFilterContentTool, "TOOLS");
+    if (!(config->filter & DbFilterAllContent))
     {
-        len += pkgi_snprintf(data + len, sizeof(data) - len, "%sASA", sep);
+        len += pkgi_snprintf(data + len, sizeof(data) - len, "%sNO_CONTENT", sep);
         sep = ",";
     }
-    if (config->filter & DbFilterRegionEUR)
+    SAVE_FILTER(DbFilterInstalled, "INSTALLED");
+    SAVE_FILTER(DbFilterMissing, "MISSING");
+    if (!(config->filter & (DbFilterInstalled | DbFilterMissing)))
     {
-        len += pkgi_snprintf(data + len, sizeof(data) - len, "%sEUR", sep);
+        len += pkgi_snprintf(data + len, sizeof(data) - len, "%sNO_STATUS", sep);
         sep = ",";
     }
-    if (config->filter & DbFilterRegionJPN)
-    {
-        len += pkgi_snprintf(data + len, sizeof(data) - len, "%sJPN", sep);
-        sep = ",";
-    }
-    if (config->filter & DbFilterRegionUSA)
-    {
-        len += pkgi_snprintf(data + len, sizeof(data) - len, "%sUSA", sep);
-        sep = ",";
-    }
+#undef SAVE_FILTER
     len += pkgi_snprintf(data + len, sizeof(data) - len, "\n");
 
+    len += pkgi_snprintf(data + len, sizeof(data) - len, "layout %s\n",
+                         config->grid_mode ? "grid" : "list");
     if (!config->version_check)
     {
         len += pkgi_snprintf(data + len, sizeof(data) - len, "no_version_check 1\n");

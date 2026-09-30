@@ -22,6 +22,7 @@ int pkgi_dialog_is_cancelled(void);
 int pkgi_dialog_is_background(void);
 int pkgi_dialog_background_progress(float* progress);
 void pkgi_dialog_restore_background(void);
+int pkgi_dialog_take_details_install(void);
 void pkgi_dialog_allow_close(int allow);
 void pkgi_dialog_message(const char* title, const char* text);
 void pkgi_dialog_error(const char* text);

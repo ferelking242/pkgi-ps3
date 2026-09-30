@@ -27,6 +27,7 @@ typedef enum {
     MenuUpdate,
     MenuMusic,
     MenuContent,
+    MenuLayout,
     MenuLoadConfig,
     MenuFolder
 } MenuType;
@@ -57,10 +58,15 @@ static MenuEntry menu_entries[] =
     { MenuFilter, "Japan", DbFilterRegionJPN },
     { MenuFilter, "USA", DbFilterRegionUSA },
 
+    { MenuText, "Status:", 0 },
+    { MenuFilter, "Installed", DbFilterInstalled },
+    { MenuFilter, "Not installed", DbFilterMissing },
+
     { MenuText, "Options:", 0 },
     { MenuMode, "Back. DL", 1 },
     { MenuMusic, "Music", 1 },
     { MenuUpdate, "Updates", 1 },
+    { MenuLayout, "Layout", 0 },
 
     { MenuLoadConfig, "Load configuration", 0 },
     { MenuFolder, "Download folder", 0 },
@@ -80,6 +86,52 @@ static MenuEntry content_entries[] =
     { MenuFilter, "Apps", DbFilterContentApp },
     { MenuFilter, "Tools", DbFilterContentTool }
 };
+
+static int menu_scroll_y;
+
+static int menu_entry_visible(const MenuEntry* entry)
+{
+    return !((entry->type == MenuSearchClear && !menu_search_clear) ||
+             (entry->type == MenuRefresh && !menu_allow_refresh));
+}
+
+static int menu_entry_gap(const MenuEntry* entry, int font_height)
+{
+    return entry->type == MenuText || entry->type == MenuRefresh ||
+           entry->type == MenuLoadConfig || entry->type == MenuFolder
+        ? font_height : 0;
+}
+
+static void menu_scroll_to_selection(int font_height)
+{
+    int y = PKGI_MENU_TOP_PADDING;
+    int selected_y = y;
+    for (uint32_t i = 0; i < PKGI_COUNTOF(menu_entries); i++)
+    {
+        const MenuEntry* entry = menu_entries + i;
+        if (!menu_entry_visible(entry))
+            continue;
+        y += menu_entry_gap(entry, font_height);
+        if (i == menu_selected)
+            selected_y = y;
+        y += font_height;
+    }
+
+    int viewport_bottom = PKGI_MENU_HEIGHT - 12;
+    int viewport_top = PKGI_MENU_TOP_PADDING;
+    if (selected_y - menu_scroll_y < viewport_top)
+        menu_scroll_y = selected_y - viewport_top;
+    else if (selected_y + font_height - menu_scroll_y > viewport_bottom)
+        menu_scroll_y = selected_y + font_height - viewport_bottom;
+    if (menu_scroll_y < 0)
+        menu_scroll_y = 0;
+
+    int max_scroll = y - viewport_bottom;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    if (menu_scroll_y > max_scroll)
+        menu_scroll_y = max_scroll;
+}
 
 int pkgi_menu_is_open(void)
 {
@@ -127,13 +179,17 @@ void pkgi_menu_start(int search_clear, const Config* config)
     menu_entries[11].text = _("Europe");
     menu_entries[12].text = _("Japan");
     menu_entries[13].text = _("USA");
-    menu_entries[14].text = _("Options:");
-    menu_entries[15].text = _("Back. DL");
-    menu_entries[16].text = _("Music");
-    menu_entries[17].text = _("Updates");
-    menu_entries[18].text = _("Load configuration");
-    menu_entries[19].text = _("Download folder");
-    menu_entries[20].text = _("Refresh...");
+    menu_entries[14].text = _("Status:");
+    menu_entries[15].text = _("Installed");
+    menu_entries[16].text = _("Not installed");
+    menu_entries[17].text = _("Options:");
+    menu_entries[18].text = _("Back. DL");
+    menu_entries[19].text = _("Music");
+    menu_entries[20].text = _("Updates");
+    menu_entries[21].text = _("Layout");
+    menu_entries[22].text = _("Load configuration");
+    menu_entries[23].text = _("Download folder");
+    menu_entries[24].text = _("Refresh...");
 
     content_entries[0].text = _("All");
     content_entries[1].text = _("Games");
@@ -192,9 +248,8 @@ int pkgi_do_menu(pkgi_input* input)
             {
                 menu_selected--;
             }
-        }        while (menu_entries[menu_selected].type == MenuText
-            || (menu_entries[menu_selected].type == MenuSearchClear && !menu_search_clear)
-            || (menu_entries[menu_selected].type == MenuRefresh && !menu_allow_refresh));
+        } while (!menu_entry_visible(menu_entries + menu_selected) ||
+                 menu_entries[menu_selected].type == MenuText);
     }
 
     if (input->active & PKGI_BUTTON_DOWN)
@@ -208,9 +263,8 @@ int pkgi_do_menu(pkgi_input* input)
             {
                 menu_selected++;
             }
-        } while (menu_entries[menu_selected].type == MenuText
-            || (menu_entries[menu_selected].type == MenuSearchClear && !menu_search_clear)
-            || (menu_entries[menu_selected].type == MenuRefresh && !menu_allow_refresh));
+        } while (!menu_entry_visible(menu_entries + menu_selected) ||
+                 menu_entries[menu_selected].type == MenuText);
     }
 
 
@@ -288,6 +342,10 @@ int pkgi_do_menu(pkgi_input* input)
         {
             menu_config.version_check ^= menu_entries[menu_selected].value;
         }
+        else if (type == MenuLayout)
+        {
+            menu_config.grid_mode ^= 1;
+        }
         else if (type == MenuContent)
         {
             menu_config.filter ^= content_entries[menu_config.content].value;
@@ -306,42 +364,35 @@ int pkgi_do_menu(pkgi_input* input)
     }
 
     int font_height = pkgi_text_height("M");
+    menu_scroll_to_selection(font_height);
 
     int menu_x = VITA_WIDTH - (pkgi_menu_width + PKGI_MAIN_HMARGIN);
     pkgi_clip_set(menu_x, PKGI_MAIN_VMARGIN, pkgi_menu_width,
                   PKGI_MENU_HEIGHT);
 
-    int y = PKGI_MENU_TOP_PADDING;
+    int y = PKGI_MENU_TOP_PADDING - menu_scroll_y;
     for (uint32_t i = 0; i < PKGI_COUNTOF(menu_entries); i++)
     {
         const MenuEntry* entry = menu_entries + i;
 
         MenuType type = entry->type;
+        if (!menu_entry_visible(entry))
+            continue;
+        y += menu_entry_gap(entry, font_height);
+
         if (type == MenuText)
         {
-            y += font_height;
-        }
-        else if (type == MenuSearchClear && !menu_search_clear)
-        {
-            continue;
-        }
-        else if (type == MenuRefresh)
-        {
-            if (!menu_allow_refresh)
-            {
-                continue;
-            }
-            y += font_height;
-        }
-        else if (type == MenuLoadConfig || type == MenuFolder)
-        {
-            y += font_height;
+            /* Section labels take the same line height as menu actions. */
         }
 
         int x = VITA_WIDTH - (pkgi_menu_width + PKGI_MAIN_HMARGIN) + PKGI_MENU_LEFT_PADDING;
 
         char text[64];
         if (type == MenuSearch || type == MenuSearchClear || type == MenuText || type == MenuRefresh)
+        {
+            pkgi_strncpy(text, sizeof(text), entry->text);
+        }
+        else if (type == MenuLoadConfig || type == MenuFolder)
         {
             pkgi_strncpy(text, sizeof(text), entry->text);
         }
@@ -380,12 +431,24 @@ int pkgi_do_menu(pkgi_input* input)
             pkgi_snprintf(text, sizeof(text), "%s %s",
                 menu_config.version_check == entry->value ? PKGI_UTF8_CHECK_ON : PKGI_UTF8_CHECK_OFF, entry->text);            
         }
+        else if (type == MenuLayout)
+        {
+            pkgi_snprintf(text, sizeof(text), "%s %s",
+                menu_config.grid_mode ? PKGI_UTF8_CHECK_ON : PKGI_UTF8_CHECK_OFF,
+                menu_config.grid_mode ? _("Grid") : _("List"));
+        }
         else if (type == MenuContent)
         {
             pkgi_snprintf(text, sizeof(text), PKGI_UTF8_CLEAR " %s", content_entries[menu_config.content].text);
         }
         
-        pkgi_draw_text_z(x, y, PKGI_MENU_TEXT_Z, (menu_selected == i) ? PKGI_COLOR_TEXT_MENU_SELECTED : PKGI_COLOR_TEXT_MENU, text);
+        if (y + font_height >= PKGI_MENU_TOP_PADDING &&
+            y < PKGI_MENU_HEIGHT - 8)
+        {
+            pkgi_draw_text_z(x, y, PKGI_MENU_TEXT_Z,
+                (menu_selected == i) ? PKGI_COLOR_TEXT_MENU_SELECTED : PKGI_COLOR_TEXT_MENU,
+                text);
+        }
 
         y += font_height;
     }

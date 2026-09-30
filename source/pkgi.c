@@ -42,6 +42,19 @@ static char search_text[256];
 static char error_state[256];
 static int osk_target_folder; /* PKGi Remastered: OSK edits download folder */
 
+#define PKGI_THUMBNAIL_SLOTS 16
+
+typedef struct {
+    char content[64];
+    pkgi_texture texture;
+} ThumbnailSlot;
+
+static ThumbnailSlot thumbnails[PKGI_THUMBNAIL_SLOTS];
+static pkgi_texture background_cover;
+static char background_cover_content[64];
+static char cover_request_content[64];
+static volatile int cover_worker_active;
+
 static void reposition(void);
 
 static const char* pkgi_get_ok_str(void)
@@ -330,6 +343,131 @@ static const char* content_type_str(ContentType content)
     }
 }
 
+static void pkgi_cover_thread(void)
+{
+    for (;;)
+    {
+        char content[64];
+        pkgi_dialog_lock();
+        pkgi_strncpy(content, sizeof(content), cover_request_content);
+        pkgi_dialog_unlock();
+
+        if (content[0])
+        {
+            /* Serialize this image fetch with package creation and install
+             * work, which also touches the shared HTTP/file services. */
+            pkgi_lock_process();
+            pkgi_download_icon(content);
+            pkgi_unlock_process();
+        }
+
+        pkgi_dialog_lock();
+        if (pkgi_stricmp(content, cover_request_content) == 0)
+        {
+            cover_worker_active = 0;
+            pkgi_dialog_unlock();
+            break;
+        }
+        pkgi_dialog_unlock();
+    }
+
+    pkgi_thread_exit();
+}
+
+static void pkgi_request_cover(const DbItem* item)
+{
+    if (!item || !item->content)
+        return;
+
+    char icon_path[128];
+    pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
+                  item->content + 7);
+    if (pkgi_get_size(icon_path) > 0)
+        return;
+
+    int start_worker = 0;
+    pkgi_dialog_lock();
+    if (pkgi_stricmp(cover_request_content, item->content) != 0)
+    {
+        pkgi_strncpy(cover_request_content, sizeof(cover_request_content),
+                     item->content);
+    }
+    if (!cover_worker_active)
+    {
+        cover_worker_active = 1;
+        start_worker = 1;
+    }
+    pkgi_dialog_unlock();
+
+    if (start_worker)
+        pkgi_start_thread("cover_thread", &pkgi_cover_thread);
+}
+
+static pkgi_texture pkgi_get_thumbnail(const DbItem* item, uint32_t slot)
+{
+    if (!item || slot >= PKGI_THUMBNAIL_SLOTS)
+        return NULL;
+
+    ThumbnailSlot* thumbnail = thumbnails + slot;
+    if (pkgi_stricmp(thumbnail->content, item->content) != 0)
+    {
+        if (thumbnail->texture)
+            pkgi_free_texture(thumbnail->texture);
+        thumbnail->texture = NULL;
+        pkgi_strncpy(thumbnail->content, sizeof(thumbnail->content), item->content);
+    }
+
+    if (!thumbnail->texture)
+    {
+        char icon_path[128];
+        pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
+                      item->content + 7);
+        if (pkgi_get_size(icon_path) > 0)
+            thumbnail->texture = pkgi_load_png_file(icon_path);
+    }
+
+    return thumbnail->texture;
+}
+
+static pkgi_texture pkgi_get_background_cover(const DbItem* item)
+{
+    if (!item)
+        return NULL;
+
+    if (pkgi_stricmp(background_cover_content, item->content) != 0)
+    {
+        if (background_cover)
+            pkgi_free_texture(background_cover);
+        background_cover = NULL;
+        pkgi_strncpy(background_cover_content, sizeof(background_cover_content),
+                     item->content);
+    }
+
+    if (!background_cover)
+    {
+        char icon_path[128];
+        pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
+                      item->content + 7);
+        if (pkgi_get_size(icon_path) > 0)
+            background_cover = pkgi_load_png_file(icon_path);
+    }
+
+    return background_cover;
+}
+
+static void pkgi_free_covers(void)
+{
+    for (uint32_t i = 0; i < PKGI_THUMBNAIL_SLOTS; i++)
+    {
+        if (thumbnails[i].texture)
+            pkgi_free_texture(thumbnails[i].texture);
+        thumbnails[i].texture = NULL;
+    }
+    if (background_cover)
+        pkgi_free_texture(background_cover);
+    background_cover = NULL;
+}
+
 static void cb_dialog_exit(int res)
 {
     state = StateTerminate;
@@ -339,6 +477,39 @@ static void cb_dialog_download(int res)
 {
     DbItem* item = pkgi_db_get(selected_item);
 
+    if (!item)
+        return;
+    item->presence = PresenceMissing;
+    pkgi_dialog_start_progress(_("Downloading..."), _("Preparing..."), 0);
+    pkgi_start_thread("download_thread", &pkgi_download_thread);
+}
+
+static void pkgi_refresh_presence(DbItem* item)
+{
+    if (item && item->presence == PresenceUnknown)
+    {
+        item->presence = pkgi_is_incomplete(item->content) ? PresenceIncomplete :
+            pkgi_is_installed(item->content) ? PresenceInstalled : PresenceMissing;
+    }
+}
+
+static void pkgi_start_details_install(void)
+{
+    DbItem* item = pkgi_db_get(selected_item);
+    if (!item)
+        return;
+
+    pkgi_refresh_presence(item);
+    if (!pkgi_check_free_space(item->size))
+        return;
+
+    if (item->presence == PresenceInstalled)
+    {
+        pkgi_dialog_ok_cancel(item->name, _("Item already installed, download again?"),
+                              &cb_dialog_download);
+        return;
+    }
+
     item->presence = PresenceMissing;
     pkgi_dialog_start_progress(_("Downloading..."), _("Preparing..."), 0);
     pkgi_start_thread("download_thread", &pkgi_download_thread);
@@ -346,8 +517,17 @@ static void cb_dialog_download(int res)
 
 static void pkgi_do_main(pkgi_input* input)
 {
-    int col_titleid = PKGI_MAIN_HMARGIN;
-    int col_region = col_titleid + pkgi_text_width("PCSE00000") + PKGI_MAIN_COLUMN_PADDING;
+    const uint32_t grid_columns = 4;
+    const int grid_cell_height = 124;
+    const int list_row_height = 34;
+    const int grid_mode = config.grid_mode != 0;
+    const int item_height = grid_mode ? grid_cell_height : list_row_height;
+    uint32_t rows_per_page = (uint32_t)(avail_height / item_height);
+    if (rows_per_page == 0)
+        rows_per_page = 1;
+    uint32_t page_size = grid_mode ? rows_per_page * grid_columns : rows_per_page;
+    int col_cover = PKGI_MAIN_HMARGIN;
+    int col_region = col_cover + 46 + PKGI_MAIN_COLUMN_PADDING;
     int col_installed = col_region + pkgi_text_width("USA") + PKGI_MAIN_COLUMN_PADDING;
     int col_name = col_installed + pkgi_text_width(PKGI_UTF8_INSTALLED) + PKGI_MAIN_COLUMN_PADDING;
 
@@ -442,149 +622,220 @@ static void pkgi_do_main(pkgi_input* input)
             db_count = pkgi_db_count();
         }
 
-        if (input->active & PKGI_BUTTON_UP)
+        if (db_count)
         {
-            if (selected_item == first_item && first_item > 0)
+            if (grid_mode && (input->active & PKGI_BUTTON_LEFT))
             {
-                first_item--;
-                selected_item = first_item;
+                selected_item = selected_item ? selected_item - 1 : db_count - 1;
             }
-            else if (selected_item > 0)
+            else if (grid_mode && (input->active & PKGI_BUTTON_RIGHT))
             {
-                selected_item--;
+                selected_item = selected_item + 1 < db_count ? selected_item + 1 : 0;
             }
-            else if (selected_item == 0)
-            {
-                selected_item = db_count - 1;
-                uint32_t max_items = avail_height / (font_height + PKGI_MAIN_ROW_PADDING) - 1;
-                first_item = db_count > max_items ? db_count - max_items - 1 : 0;
-            }
-        }
 
-        if (input->active & PKGI_BUTTON_DOWN)
-        {
-            uint32_t max_items = avail_height / (font_height + PKGI_MAIN_ROW_PADDING) - 1;
-            if (selected_item == db_count - 1)
+            if (input->active & PKGI_BUTTON_UP)
             {
-                selected_item = first_item = 0;
-            }
-            else if (selected_item == first_item + max_items)
-            {
-                first_item++;
-                selected_item++;
-            }
-            else
-            {
-                selected_item++;
-            }
-        }
-        
-        if (input->active & PKGI_BUTTON_LT)
-        {
-            uint32_t max_items = avail_height / (font_height + PKGI_MAIN_ROW_PADDING) - 1;
-            if (first_item < max_items)
-            {
-                first_item = 0;
-            }
-            else
-            {
-                first_item -= max_items;
-            }
-            if (selected_item < max_items)
-            {
-                selected_item = 0;
-            }
-            else
-            {
-                selected_item -= max_items;
-            }
-        }
-
-        if (input->active & PKGI_BUTTON_RT)
-        {
-            uint32_t max_items = avail_height / (font_height + PKGI_MAIN_ROW_PADDING) - 1;
-            if (first_item + max_items < db_count - 1)
-            {
-                first_item += max_items;
-                selected_item += max_items;
-                if (selected_item >= db_count)
+                if (grid_mode)
+                {
+                    uint32_t column = selected_item % grid_columns;
+                    uint32_t row = selected_item / grid_columns;
+                    if (row)
+                    {
+                        selected_item -= grid_columns;
+                    }
+                    else
+                    {
+                        uint32_t last_row = ((db_count - 1) / grid_columns) * grid_columns;
+                        selected_item = last_row + column;
+                        if (selected_item >= db_count)
+                            selected_item = db_count - 1;
+                    }
+                }
+                else if (selected_item)
+                {
+                    selected_item--;
+                }
+                else
                 {
                     selected_item = db_count - 1;
                 }
             }
+
+            if (input->active & PKGI_BUTTON_DOWN)
+            {
+                if (grid_mode)
+                {
+                    uint32_t next = selected_item + grid_columns;
+                    selected_item = next < db_count
+                        ? next : selected_item % grid_columns;
+                }
+                else
+                {
+                    selected_item = selected_item + 1 < db_count
+                        ? selected_item + 1 : 0;
+                }
+            }
+
+            if (input->active & PKGI_BUTTON_LT)
+            {
+                if (grid_mode)
+                {
+                    first_item = first_item > page_size ? first_item - page_size : 0;
+                    selected_item = selected_item > page_size
+                        ? selected_item - page_size : 0;
+                }
+                else
+                {
+                    first_item = first_item > page_size ? first_item - page_size : 0;
+                    selected_item = selected_item > page_size
+                        ? selected_item - page_size : 0;
+                }
+            }
+
+            if (input->active & PKGI_BUTTON_RT)
+            {
+                selected_item = selected_item + page_size < db_count
+                    ? selected_item + page_size : db_count - 1;
+                first_item = (selected_item / page_size) * page_size;
+            }
+
+            if (grid_mode)
+            {
+                uint32_t selected_row = selected_item / grid_columns;
+                uint32_t first_row = first_item / grid_columns;
+                if (selected_row < first_row)
+                    first_item = selected_row * grid_columns;
+                else if (selected_row >= first_row + rows_per_page)
+                    first_item = (selected_row - rows_per_page + 1) * grid_columns;
+            }
+            else if (selected_item < first_item)
+            {
+                first_item = selected_item;
+            }
+            else if (selected_item >= first_item + rows_per_page)
+            {
+                first_item = selected_item - rows_per_page + 1;
+            }
         }
     }
     
-    int y = font_height*3/2 + PKGI_MAIN_HLINE_EXTRA + PKGI_MAIN_VMARGIN;
-    int line_height = font_height + PKGI_MAIN_ROW_PADDING;
-    for (uint32_t i = first_item; i < db_count; i++)
+    int list_top = font_height * 3 / 2 + PKGI_MAIN_HLINE_EXTRA + PKGI_MAIN_VMARGIN;
+    if (grid_mode)
     {
-        DbItem* item = pkgi_db_get(i);
+        int grid_width = VITA_WIDTH - 2 * PKGI_MAIN_HMARGIN -
+                         PKGI_MAIN_SCROLL_WIDTH - PKGI_MAIN_SCROLL_PADDING;
+        int cell_width = grid_width / grid_columns;
+        uint32_t end_item = min32(db_count, first_item + page_size);
 
-        if (i == selected_item)
+        for (uint32_t i = first_item; i < end_item; i++)
         {
-            pkgi_draw_fill_rect_z(0, y, PKGI_FONT_Z, VITA_WIDTH, font_height + PKGI_MAIN_ROW_PADDING - 1, PKGI_COLOR_SELECTED_BACKGROUND);
-        }
-        uint32_t color = PKGI_COLOR_TEXT;
+            DbItem* item = pkgi_db_get(i);
+            uint32_t slot = i - first_item;
+            int x = PKGI_MAIN_HMARGIN + (slot % grid_columns) * cell_width;
+            int y = list_top + (slot / grid_columns) * grid_cell_height;
+            int card_width = cell_width - 8;
+            uint32_t color = PKGI_COLOR_TEXT;
 
-        char titleid[10];
-        pkgi_memcpy(titleid, item->content + 7, 9);
-        titleid[9] = 0;
+            pkgi_refresh_presence(item);
 
-        if (item->presence == PresenceUnknown)
-        {
-            item->presence = pkgi_is_incomplete(item->content) ? PresenceIncomplete : pkgi_is_installed(item->content) ? PresenceInstalled : PresenceMissing;
-        }
+            pkgi_draw_fill_rect_z(x, y, PKGI_FONT_Z - 1, card_width,
+                                  grid_cell_height - 8,
+                                  i == selected_item ? PKGI_COLOR_SELECTED_BACKGROUND :
+                                                       PKGI_COLOR_DIALOG_INNER);
+            if (i == selected_item)
+                pkgi_draw_rect_z(x, y, PKGI_FONT_Z, card_width,
+                                 grid_cell_height - 8, PKGI_COLOR_ACCENT);
 
-        char size_str[64];
-        pkgi_friendly_size(size_str, sizeof(size_str), item->size);
-        int sizew = pkgi_text_width(size_str);
+            if (pkgi_db_is_selected(i))
+                pkgi_draw_text_z(x + 5, y + 5, PKGI_FONT_Z,
+                                 PKGI_COLOR_ACCENT, PKGI_UTF8_CHECK_ON);
 
-        pkgi_clip_set(0, y, VITA_WIDTH, line_height);
+            pkgi_texture cover = pkgi_get_thumbnail(item, slot);
+            if (cover)
+                pkgi_draw_texture_z(cover, x + 10, y + 29, PKGI_FONT_Z, 0.17f);
 
-        /* PKGi Remastered: selection marker before the Title ID */
-        if (pkgi_db_is_selected(i))
-        {
-            pkgi_draw_text(col_titleid, y, PKGI_COLOR_ACCENT, "\x04");
-        }
-        pkgi_draw_text(col_titleid + pkgi_text_width("\x04"), y, color, titleid);
-        const char* region;
-        switch (pkgi_get_region(item->content))
-        {
-        case RegionASA: region = "ASA"; break;
-        case RegionEUR: region = "EUR"; break;
-        case RegionJPN: region = "JPN"; break;
-        case RegionUSA: region = "USA"; break;
-        default: region = "???"; break;
-        }
-        pkgi_draw_text(col_region, y, color, region);
-        if (item->presence == PresenceIncomplete)
-        {
-            pkgi_draw_text(col_installed, y, color, PKGI_UTF8_PARTIAL);
-        }
-        else if (item->presence == PresenceInstalled)
-        {
-            pkgi_draw_text(col_installed, y, color, PKGI_UTF8_INSTALLED);
-        }
-        pkgi_draw_text(VITA_WIDTH - (PKGI_MAIN_SCROLL_WIDTH + PKGI_MAIN_SCROLL_PADDING + PKGI_MAIN_HMARGIN + sizew), y, color, size_str);
-        pkgi_clip_remove();
+            int text_x = x + 72;
+            int text_width = card_width - 82;
+            pkgi_clip_set(text_x, y + 8, text_width, 58);
+            pkgi_draw_text_ttf(text_x, y + 8, PKGI_FONT_Z, color, item->name);
+            pkgi_clip_remove();
 
-        pkgi_clip_set(col_name, y, VITA_WIDTH - PKGI_MAIN_SCROLL_WIDTH - PKGI_MAIN_SCROLL_PADDING - PKGI_MAIN_COLUMN_PADDING - sizew - col_name, line_height);
-        pkgi_draw_text_ttf(col_name, y, PKGI_FONT_Z, color, item->name);
-        pkgi_clip_remove();
-
-        y += font_height + PKGI_MAIN_ROW_PADDING;
-        if (y > VITA_HEIGHT - (font_height + PKGI_MAIN_HLINE_EXTRA*6 + PKGI_MAIN_VMARGIN))
-        {
-            break;
-        }
-        else if (y + font_height > VITA_HEIGHT - (font_height + PKGI_MAIN_HLINE_EXTRA))
-        {
-            line_height = (VITA_HEIGHT - (font_height + PKGI_MAIN_HLINE_EXTRA)) - (y + 1);
-            if (line_height < PKGI_MAIN_ROW_PADDING)
+            const char* region = "???";
+            switch (pkgi_get_region(item->content))
             {
-                break;
+            case RegionASA: region = "ASA"; break;
+            case RegionEUR: region = "EUR"; break;
+            case RegionJPN: region = "JPN"; break;
+            case RegionUSA: region = "USA"; break;
+            default: break;
             }
+
+            char meta[64];
+            char size_str[32];
+            pkgi_friendly_size(size_str, sizeof(size_str), item->size);
+            pkgi_snprintf(meta, sizeof(meta), "%s  %s  %s", region,
+                item->presence == PresenceInstalled ? PKGI_UTF8_INSTALLED :
+                item->presence == PresenceIncomplete ? PKGI_UTF8_PARTIAL : "",
+                size_str);
+            pkgi_clip_set(text_x, y + grid_cell_height - 31, text_width, 22);
+            pkgi_draw_text_z(text_x, y + grid_cell_height - 31,
+                             PKGI_FONT_Z, PKGI_COLOR_TEXT_DIM, meta);
+            pkgi_clip_remove();
+        }
+    }
+    else
+    {
+        uint32_t end_item = min32(db_count, first_item + rows_per_page);
+        for (uint32_t i = first_item; i < end_item; i++)
+        {
+            DbItem* item = pkgi_db_get(i);
+            int y = list_top + (i - first_item) * list_row_height;
+            int text_y = y + (list_row_height - font_height) / 2;
+            uint32_t color = PKGI_COLOR_TEXT;
+
+            pkgi_refresh_presence(item);
+
+            char size_str[64];
+            pkgi_friendly_size(size_str, sizeof(size_str), item->size);
+            int sizew = pkgi_text_width(size_str);
+            pkgi_clip_set(0, y, VITA_WIDTH, list_row_height);
+
+            if (i == selected_item)
+                pkgi_draw_fill_rect_z(0, y, PKGI_FONT_Z - 1, VITA_WIDTH,
+                                      list_row_height - 1, PKGI_COLOR_SELECTED_BACKGROUND);
+            if (pkgi_db_is_selected(i))
+                pkgi_draw_text(col_cover, text_y, PKGI_COLOR_ACCENT, PKGI_UTF8_CHECK_ON);
+
+            pkgi_texture cover = pkgi_get_thumbnail(item, i - first_item);
+            if (cover)
+                pkgi_draw_texture_z(cover, col_cover + 15, y + 6, PKGI_FONT_Z, 0.1f);
+
+            const char* region = "???";
+            switch (pkgi_get_region(item->content))
+            {
+            case RegionASA: region = "ASA"; break;
+            case RegionEUR: region = "EUR"; break;
+            case RegionJPN: region = "JPN"; break;
+            case RegionUSA: region = "USA"; break;
+            default: break;
+            }
+
+            pkgi_draw_text(col_region, text_y, color, region);
+            if (item->presence == PresenceIncomplete)
+                pkgi_draw_text(col_installed, text_y, color, PKGI_UTF8_PARTIAL);
+            else if (item->presence == PresenceInstalled)
+                pkgi_draw_text(col_installed, text_y, color, PKGI_UTF8_INSTALLED);
+
+            pkgi_draw_text(VITA_WIDTH - (PKGI_MAIN_SCROLL_WIDTH +
+                PKGI_MAIN_SCROLL_PADDING + PKGI_MAIN_HMARGIN + sizew),
+                text_y, color, size_str);
+            pkgi_clip_remove();
+
+            pkgi_clip_set(col_name, y, VITA_WIDTH - PKGI_MAIN_SCROLL_WIDTH -
+                PKGI_MAIN_SCROLL_PADDING - PKGI_MAIN_COLUMN_PADDING - sizew -
+                col_name, list_row_height);
+            pkgi_draw_text_ttf(col_name, text_y, PKGI_FONT_Z, color, item->name);
+            pkgi_clip_remove();
         }
     }
 
@@ -599,11 +850,10 @@ static void pkgi_do_main(pkgi_input* input)
     // scroll-bar
     if (db_count != 0)
     {
-        uint32_t max_items = (avail_height + font_height + PKGI_MAIN_ROW_PADDING - 1) / (font_height + PKGI_MAIN_ROW_PADDING) - 1;
-        if (max_items < db_count)
+        if (page_size < db_count)
         {
             uint32_t min_height = PKGI_MAIN_SCROLL_MIN_HEIGHT;
-            uint32_t height = max_items * avail_height / db_count;
+            uint32_t height = page_size * avail_height / db_count;
             uint32_t start = first_item * (avail_height - (height < min_height ? min_height : 0)) / db_count;
             height = max32(height, min_height);
             pkgi_draw_fill_rect_z(VITA_WIDTH - (PKGI_MAIN_HMARGIN + PKGI_MAIN_SCROLL_WIDTH), font_height + PKGI_MAIN_HLINE_EXTRA + PKGI_MAIN_VMARGIN + start + 2, PKGI_FONT_Z, PKGI_MAIN_SCROLL_WIDTH, height, PKGI_COLOR_SCROLL_BAR);
@@ -615,8 +865,14 @@ static void pkgi_do_main(pkgi_input* input)
         input->pressed &= ~pkgi_ok_button();
 
         DbItem* item = pkgi_db_get(selected_item);
+        pkgi_refresh_presence(item);
 
-        if (!pkgi_check_free_space(item->size))
+        if (grid_mode)
+        {
+            pkgi_request_cover(item);
+            pkgi_dialog_details(item, content_type_str(item->type));
+        }
+        else if (!pkgi_check_free_space(item->size))
         {
             LOG("[%.9s] %s - no free space", item->content + 7, item->name);
             pkgi_dialog_error(_("Not enough free space on HDD"));
@@ -647,7 +903,7 @@ static void pkgi_do_main(pkgi_input* input)
 
         DbItem* item = pkgi_db_get(selected_item);
 
-        pkgi_download_icon(item->content);
+        pkgi_request_cover(item);
         pkgi_dialog_details(item, content_type_str(item->type));
     }
 }
@@ -945,7 +1201,23 @@ int main(int argc, const char* argv[])
             input.active &= ~PKGI_BUTTON_L2;
         }
 
-        pkgi_draw_background(background);
+        pkgi_texture selected_art = NULL;
+        if (state == StateMain && pkgi_db_count())
+        {
+            DbItem* selected = pkgi_db_get(selected_item);
+            if (selected)
+            {
+                pkgi_request_cover(selected);
+                selected_art = pkgi_get_background_cover(selected);
+            }
+        }
+
+        pkgi_draw_background(selected_art ? selected_art : background);
+        if (selected_art)
+        {
+            pkgi_draw_fill_rect_alpha_z(0, 0, PKGI_FONT_Z - 10,
+                VITA_WIDTH, VITA_HEIGHT, PKGI_COLOR_ART_TINT, 178);
+        }
 
         if (state == StateUpdateDone)
         {
@@ -992,6 +1264,9 @@ int main(int argc, const char* argv[])
             }
         }
 
+        if (pkgi_dialog_take_details_install())
+            pkgi_start_details_install();
+
         if (pkgi_dialog_input_update())
         {
             char input_text[256];
@@ -1034,7 +1309,8 @@ int main(int argc, const char* argv[])
                 pkgi_menu_get(&new_config);
                 if (config_temp.sort != new_config.sort ||
                     config_temp.order != new_config.order ||
-                    config_temp.filter != new_config.filter)
+                    config_temp.filter != new_config.filter ||
+                    config_temp.grid_mode != new_config.grid_mode)
                 {
                     config_temp = new_config;
                     pkgi_db_configure(search_active ? search_text : NULL, &config_temp);
@@ -1061,7 +1337,9 @@ int main(int argc, const char* argv[])
                 }
                 else if (mres == MenuResultCancel)
                 {
-                    if (config_temp.sort != config.sort || config_temp.order != config.order || config_temp.filter != config.filter)
+                    if (config_temp.sort != config.sort || config_temp.order != config.order ||
+                        config_temp.filter != config.filter ||
+                        config_temp.grid_mode != config.grid_mode)
                     {
                         pkgi_db_configure(search_active ? search_text : NULL, &config);
                         reposition();
@@ -1133,6 +1411,7 @@ int main(int argc, const char* argv[])
 
     LOG("finished");
     mini18n_close();
+    pkgi_free_covers();
     pkgi_free_texture(background);
     pkgi_end();
 	return 0;
