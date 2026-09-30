@@ -22,6 +22,7 @@
 #include <curl/curl.h>
 
 #include "ttf_render.h"
+#include "ps3_input.h"
 
 #include <mikmod.h>
 #include "mikmod_loader.h"
@@ -650,21 +651,16 @@ void pkgi_start(void)
     }
 
     sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN, &ret);
-    if (ret == 0)
-    {
-        g_ok_button = PKGI_BUTTON_O;
-        g_cancel_button = PKGI_BUTTON_X;
-    }
-    else
-    {
-        g_ok_button = PKGI_BUTTON_X;
-        g_cancel_button = PKGI_BUTTON_O;
-    }
-    
-	ya2d_init();
+    g_ok_button = (ret == 0) ? PKGI_BUTTON_O : PKGI_BUTTON_X;
+    g_cancel_button = (ret == 0) ? PKGI_BUTTON_X : PKGI_BUTTON_O;
 
-	ya2d_paddata[0].ANA_L_H = ANALOG_CENTER;
-	ya2d_paddata[0].ANA_L_V = ANALOG_CENTER;
+    ps3in_set_buttons(g_ok_button, g_cancel_button);
+
+    ya2d_init();
+    ps3in_init();
+
+    ya2d_paddata[0].ANA_L_H = ANALOG_CENTER;
+    ya2d_paddata[0].ANA_L_V = ANALOG_CENTER;
 
     tex_buttons.circle   = pkgi_load_image_buffer(CIRCLE, png);
     tex_buttons.cross    = pkgi_load_image_buffer(CROSS, png);
@@ -689,37 +685,37 @@ void pkgi_start(void)
 
 int pkgi_update(pkgi_input* input)
 {
-	ya2d_controlsRead();
-    
+    ya2d_controlsRead();
+
+    /*
+     * PKGi Remastered: robust input layer (see ps3_input.c).
+     * Multi-port scan, frame validation, analog hysteresis and
+     * time-based repeat. The legacy pkgi_input fields (pressed /
+     * down / active) are kept in sync so the existing UI code and
+     * dialogs keep working unchanged.
+     */
+    static pkgi_ui_input ui;
+
     uint32_t previous = input->down;
-    memcpy(&input->down, &ya2d_paddata[0].button[2], sizeof(uint32_t));
+    /* input->delta is milliseconds; the input layer works in µs. */
+    ps3in_poll((uint64_t)input->delta * 1000u, &ui);
 
-    if (ya2d_paddata[0].ANA_L_V < ANALOG_MIN)
-        input->down |= PKGI_BUTTON_UP;
-        
-    if (ya2d_paddata[0].ANA_L_V > ANALOG_MAX)
-        input->down |= PKGI_BUTTON_DOWN;
-        
-    if (ya2d_paddata[0].ANA_L_H < ANALOG_MIN)
-        input->down |= PKGI_BUTTON_LEFT;
-        
-    if (ya2d_paddata[0].ANA_L_H > ANALOG_MAX)
-        input->down |= PKGI_BUTTON_RIGHT;
+    input->down = ui.held;
+    input->pressed = ui.pressed;
 
-    input->pressed = input->down & ~previous;
-    input->active = input->pressed;
-
-    if (input->down == previous)
+    /* Active = fresh press or held navigation (time-based repeat is
+     * carried by ui.event so lists scroll at a controlled rate). */
+    input->active = ui.pressed;
+    if (!input->active && ui.event != UI_INPUT_NONE)
     {
-        if (g_button_frame_count >= 10)
+        switch (ui.event)
         {
-            input->active = input->down;
+        case UI_INPUT_UP:    input->active = PS3IN_UP;    break;
+        case UI_INPUT_DOWN:  input->active = PS3IN_DOWN;  break;
+        case UI_INPUT_LEFT:  input->active = PS3IN_LEFT;  break;
+        case UI_INPUT_RIGHT: input->active = PS3IN_RIGHT; break;
+        default: break;
         }
-        g_button_frame_count++;
-    }
-    else
-    {
-        g_button_frame_count = 0;
     }
 
 #ifdef PKGI_ENABLE_LOGGING
