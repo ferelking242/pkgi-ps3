@@ -42,6 +42,8 @@ typedef struct {
 static input_state in;
 static uint32_t g_ok_button;
 static uint32_t g_cancel_button;
+static padData g_pad_cache[PS3IN_MAX_PORTS];
+static uint8_t g_pad_cache_valid[PS3IN_MAX_PORTS];
 
 void ps3in_set_buttons(uint32_t ok_button, uint32_t cancel_button)
 {
@@ -88,15 +90,24 @@ static int ps3in_frame(const padData* d, uint32_t* buttons,
     return 1;
 }
 
+static int axis_is_active(uint16_t value)
+{
+    return value < ANALOG_ON || value > 0xFF - ANALOG_ON;
+}
+
 void ps3in_init(void)
 {
     /* ya2d_init() already initializes libpad; do not initialize it twice. */
     memset(&in, 0, sizeof(in));
+    memset(g_pad_cache, 0, sizeof(g_pad_cache));
+    memset(g_pad_cache_valid, 0, sizeof(g_pad_cache_valid));
 }
 
 static int scan_ports(padData* out_data)
 {
     padInfo2 info;
+    padData first_neutral;
+    int have_neutral = 0;
     memset(&info, 0, sizeof(info));
 
     if (ioPadGetInfo2(&info) != 0)
@@ -105,17 +116,55 @@ static int scan_ports(padData* out_data)
     for (int i = 0; i < PS3IN_MAX_PORTS; i++)
     {
         if (!info.port_status[i])
+        {
+            g_pad_cache_valid[i] = 0;
+            continue;
+        }
+
+        /*
+         * PSL1GHT only fills padData when that port's input changes; a
+         * zero-length read is not a neutral controller state. Keep the last
+         * sample so held buttons, analog position, and key repeat persist.
+         */
+        padData changed;
+        memset(&changed, 0, sizeof(changed));
+        if (ioPadGetData(i, &changed) == 0 && changed.len > 0)
+        {
+            g_pad_cache[i] = changed;
+            g_pad_cache_valid[i] = 1;
+        }
+
+        if (!g_pad_cache_valid[i])
             continue;
 
-        memset(out_data, 0, sizeof(padData));
-        if (ioPadGetData(i, out_data) != 0)
+        uint32_t buttons = 0;
+        uint16_t lx = 0x80, ly = 0x80;
+        if (!ps3in_frame(&g_pad_cache[i], &buttons, &lx, &ly))
             continue;
 
-        if (out_data->len > 0)
+        if (!have_neutral)
+        {
+            first_neutral = g_pad_cache[i];
+            have_neutral = 1;
+        }
+
+        /*
+         * Prefer a pad that is actually being used over a connected but
+         * idle pad on a lower-numbered port. If several are active, port
+         * order makes the choice deterministic.
+         */
+        if (buttons || axis_is_active(lx) || axis_is_active(ly))
+        {
+            *out_data = g_pad_cache[i];
             return 1;
+        }
     }
 
-    return 0;
+    if (!have_neutral)
+        return 0;
+
+    *out_data = first_neutral;
+    return 1;
 }
 
 static void apply_axis(uint16_t v, int* latch, uint32_t* nav,

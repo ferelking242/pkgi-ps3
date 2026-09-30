@@ -48,6 +48,8 @@ jobs:
     - name: Build PKGi App Package
       run: |
         make pkg
+        test -s build/pkg/USRDIR/config.txt
+        test -s build/pkg/USRDIR/dbformat.txt
 
     - name: Push package artifact
       uses: actions/upload-artifact@v4

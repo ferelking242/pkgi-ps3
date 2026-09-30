@@ -8,7 +8,6 @@
 #include <sys/process.h>
 #include <sysutil/osk.h>
 
-#include <io/pad.h>
 #include <lv2/sysfs.h>
 #include <lv2/process.h>
 #include <net/net.h>
@@ -37,11 +36,6 @@
 
 #define SCE_IME_DIALOG_MAX_TITLE_LENGTH	(128)
 #define SCE_IME_DIALOG_MAX_TEXT_LENGTH	(512)
-
-#define ANALOG_CENTER       0x78
-#define ANALOG_THRESHOLD    0x68
-#define ANALOG_MIN          (ANALOG_CENTER - ANALOG_THRESHOLD)
-#define ANALOG_MAX          (ANALOG_CENTER + ANALOG_THRESHOLD)
 
 #define PKGI_USER_AGENT "Mozilla/5.0 (PLAYSTATION 3; 1.00)"
 
@@ -660,9 +654,6 @@ void pkgi_start(void)
     ya2d_init();
     ps3in_init();
 
-    ya2d_paddata[0].ANA_L_H = ANALOG_CENTER;
-    ya2d_paddata[0].ANA_L_V = ANALOG_CENTER;
-
     tex_buttons.circle   = pkgi_load_image_buffer(CIRCLE, png);
     tex_buttons.cross    = pkgi_load_image_buffer(CROSS, png);
     tex_buttons.triangle = pkgi_load_image_buffer(TRIANGLE, png);
@@ -686,8 +677,6 @@ void pkgi_start(void)
 
 int pkgi_update(pkgi_input* input)
 {
-    ya2d_controlsRead();
-
     /*
      * PKGi Remastered: robust input layer (see ps3_input.c).
      * Multi-port scan, normalized padData mapping, analog hysteresis and

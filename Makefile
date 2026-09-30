@@ -140,6 +140,8 @@ run:
 
 #---------------------------------------------------------------------------------
 pkg:	$(BUILD) $(OUTPUT).pkg
+	@test -s "$(BUILDDIR)/pkg/USRDIR/config.txt" || (echo "Missing packaged USRDIR/config.txt" >&2; exit 1)
+	@test -s "$(BUILDDIR)/pkg/USRDIR/dbformat.txt" || (echo "Missing packaged USRDIR/dbformat.txt" >&2; exit 1)
 
 #---------------------------------------------------------------------------------
 
