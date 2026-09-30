@@ -194,7 +194,7 @@ int pkgi_check_free_space(uint64_t size)
     return 1;
 }
 
-static void pkgi_friendly_size(char* text, uint32_t textlen, int64_t size)
+void pkgi_friendly_size(char* text, uint32_t textlen, int64_t size)
 {
     if (size <= 0)
     {

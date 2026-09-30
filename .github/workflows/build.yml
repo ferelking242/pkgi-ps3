@@ -52,6 +52,21 @@ jobs:
     - name: Push package artifact
       uses: actions/upload-artifact@v4
       with:
-        name: pkgi-ps3-build_${{ env.sha_name }}
-        path: pkgi-ps3.pkg
+        name: pkgi-remastered-build_${{ env.sha_name }}
+        path: pkgi-remastered.pkg
         if-no-files-found: error
+        retention-days: 14
+
+    - name: Publish PKG to rolling release
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ci-latest
+        name: PKGi Remastered — latest CI build
+        body: |
+          Build automatique de `main`.
+
+          Installez `pkgi-remastered.pkg` via Package Manager (HEN/CFW requis).
+        files: pkgi-remastered.pkg
+        overwrite_files: true
+      continue-on-error: true

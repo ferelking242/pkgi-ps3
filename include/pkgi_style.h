@@ -48,6 +48,12 @@
 #define PKGI_COLOR_PROGRESS_BACKGROUND  PKGI_COLOR(128, 128, 128)
 #define PKGI_COLOR_PROGRESS_BAR         PKGI_COLOR(128, 255, 0)
 
+/* PKGi Remastered */
+#define PKGI_COLOR_OVERLAY              RGBA_COLOR(0x10, 0xA0)  /* dark translucent */
+#define PKGI_COLOR_PLACEHOLDER_BG       PKGI_COLOR(70, 70, 78)
+#define PKGI_COLOR_TEXT_DIM             PKGI_COLOR(190, 190, 200)
+#define PKGI_COLOR_ACCENT               PKGI_COLOR(0, 160, 255)
+
 #define PKGI_ANIMATION_SPEED 4000 // px/second
 
 #define PKGI_FONT_Z      1000

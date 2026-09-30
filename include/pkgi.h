@@ -99,6 +99,9 @@ void pkgi_dialog_input_get_text(char* text, uint32_t size);
 
 int pkgi_check_free_space(uint64_t http_length);
 
+/* Human-readable size (B/KB/MB/GB), localized units. */
+void pkgi_friendly_size(char* text, uint32_t textlen, int64_t size);
+
 typedef struct pkgi_http pkgi_http;
 
 int pkgi_validate_url(const char* url);

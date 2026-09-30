@@ -77,12 +77,36 @@ void pkgi_dialog_details(DbItem *item, const char* content_type)
     if (!pkg_icon && pkgi_get_size(dialog_extra)) 
         pkg_icon = pkgi_load_png_file(dialog_extra);
 
-    pkgi_snprintf(dialog_extra, sizeof(dialog_extra), "ID: %s\n\n%s: %s - RAP(%s) SHA256(%s)", 
-        item->content, _("Content"), content_type,
+    /* PKGi Remastered: build the full info sheet from available data.
+     * Only fields actually present in the database row are shown. */
+    char info[512];
+    int n = 0;
+
+    n += pkgi_snprintf(info + n, sizeof(info) - n, "ID: %s\n", item->content);
+
+    if (item->title_id && item->title_id[0])
+        n += pkgi_snprintf(info + n, sizeof(info) - n, "Title ID: %s\n", item->title_id);
+
+    n += pkgi_snprintf(info + n, sizeof(info) - n, "%s: %s\n", _("Content"), content_type);
+
+    if (item->region && item->region[0])
+        n += pkgi_snprintf(info + n, sizeof(info) - n, "Region: %s\n", item->region);
+
+    if (item->size > 0)
+    {
+        char size[32];
+        pkgi_friendly_size(size, sizeof(size), item->size);
+        n += pkgi_snprintf(info + n, sizeof(info) - n, "Size: %s\n", size);
+    }
+
+    if (item->last_mod && item->last_mod[0])
+        n += pkgi_snprintf(info + n, sizeof(info) - n, "Updated: %s\n", item->last_mod);
+
+    n += pkgi_snprintf(info + n, sizeof(info) - n, "RAP(%s) SHA256(%s)",
         (item->rap ? PKGI_UTF8_CHECK_ON : PKGI_UTF8_CHECK_OFF),
         (item->digest ? PKGI_UTF8_CHECK_ON : PKGI_UTF8_CHECK_OFF));
 
-    pkgi_dialog_data_init(DialogDetails, item->name, dialog_extra);
+    pkgi_dialog_data_init(DialogDetails, item->name, info);
     pkgi_strncpy(dialog_extra, sizeof(dialog_extra), item->description);
 
     db_item = item;
@@ -328,10 +352,40 @@ void pkgi_do_dialog(pkgi_input* input)
     }
     else if (local_type == DialogDetails)
     {
-        pkgi_draw_texture_z(pkg_icon, PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING + 425, PKGI_DIALOG_VMARGIN + PKGI_DIALOG_PADDING + 25, PKGI_DIALOG_TEXT_Z, 0.5);
+        /* PKGi Remastered details sheet: dark overlay, cover left,
+         * info column right, clean placeholder when no cover. */
+        pkgi_draw_fill_rect_z(0, 0, PKGI_DIALOG_TEXT_Z - 1, VITA_WIDTH, VITA_HEIGHT, PKGI_COLOR_OVERLAY);
 
-        pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, PKGI_DIALOG_VMARGIN + PKGI_DIALOG_PADDING + font_height*2, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_text);
-        pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, PKGI_DIALOG_VMARGIN + PKGI_DIALOG_PADDING + font_height*5, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_extra);
+        const int cover_w = 176;
+        const int cover_h = 176;
+        const int cover_x = PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING + 8;
+        const int cover_y = PKGI_DIALOG_VMARGIN + PKGI_DIALOG_PADDING + font_height + 24;
+
+        if (pkg_icon)
+        {
+            pkgi_draw_texture_z(pkg_icon, cover_x, cover_y, PKGI_DIALOG_TEXT_Z, 0.5f);
+        }
+        else
+        {
+            pkgi_draw_fill_rect_z(cover_x, cover_y, PKGI_DIALOG_TEXT_Z, cover_w, cover_h, PKGI_COLOR_PLACEHOLDER_BG);
+            const char* nc = _("No Cover");
+            pkgi_draw_text_z(cover_x + (cover_w - pkgi_text_width(nc)) / 2,
+                             cover_y + cover_h / 2 - font_height / 2,
+                             PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIM, nc);
+        }
+
+        int info_x = cover_x + cover_w + 24;
+        int info_y = cover_y;
+
+        /* name (title) on top of the info column */
+        pkgi_draw_text_ttf(info_x, info_y - font_height, PKGI_DIALOG_TEXT_Z,
+                           PKGI_COLOR_TEXT_DIALOG, local_title);
+
+        /* info lines below, clipped to the right column */
+        pkgi_clip_set(info_x, info_y, VITA_WIDTH - PKGI_DIALOG_HMARGIN - PKGI_DIALOG_PADDING - info_x, h);
+        pkgi_draw_text_z(info_x, info_y, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_text);
+        pkgi_draw_text_z(info_x, info_y + font_height * 2, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIM, local_extra);
+        pkgi_clip_remove();
 
         if (local_allow_close)
         {
