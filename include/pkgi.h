@@ -73,6 +73,7 @@ uint64_t pkgi_get_free_space(void);
 const char* pkgi_get_config_folder(void);
 const char* pkgi_get_temp_folder(void);
 const char* pkgi_get_app_folder(void);
+void pkgi_set_download_folder(const char* path); /* PKGi Remastered */
 int pkgi_is_incomplete(const char* titleid);
 int pkgi_is_installed(const char* titleid);
 int pkgi_install(const char* titleid);

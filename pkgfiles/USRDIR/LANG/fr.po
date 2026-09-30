@@ -310,3 +310,36 @@ msgstr "Mise à jour :"
 
 msgid "Title ID"
 msgstr "Title ID"
+
+msgid "Selection"
+msgstr "Sélection"
+
+msgid "Selection cleared"
+msgstr "Sélection effacée"
+
+msgid "Mark items with SELECT, download with START"
+msgstr "Marquez avec SELECT, téléchargez avec START"
+
+msgid "Nothing selected. Mark items with SELECT first."
+msgstr "Rien de sélectionné. Marquez d'abord des éléments avec SELECT."
+
+msgid "Download all"
+msgstr "Tout télécharger"
+
+msgid "%u selected"
+msgstr "%u sélectionné(s)"
+
+msgid "Batch download"
+msgstr "Téléchargement par lot"
+
+msgid "Batch %u/%u"
+msgstr "Lot %u/%u"
+
+msgid "%u downloaded, %u failed"
+msgstr "%u téléchargé(s), %u échec(s)"
+
+msgid "Download folder"
+msgstr "Dossier de téléchargement"
+
+msgid "Invalid folder: must be an absolute /dev_hdd0 path"
+msgstr "Dossier invalide : doit être un chemin /dev_hdd0 absolu"

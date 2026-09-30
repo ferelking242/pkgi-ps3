@@ -74,6 +74,7 @@ static int g_ok_button;
 static int g_cancel_button;
 static uint32_t g_button_frame_count;
 static u64 g_time;
+static char g_download_folder[128];
 
 static int g_ime_active;
 static int osk_action = 0;
@@ -804,7 +805,19 @@ const char* pkgi_get_config_folder(void)
 
 const char* pkgi_get_temp_folder(void)
 {
+    /* PKGi Remastered: user-configurable download folder
+     * (config.txt: download_folder). Falls back to the default. */
+    if (g_download_folder[0])
+        return g_download_folder;
     return PKGI_TMP_FOLDER;
+}
+
+void pkgi_set_download_folder(const char* path)
+{
+    if (path && path[0] == '/')
+        pkgi_strncpy(g_download_folder, sizeof(g_download_folder), path);
+    else
+        g_download_folder[0] = 0;
 }
 
 const char* pkgi_get_app_folder(void)

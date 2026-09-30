@@ -652,6 +652,38 @@ DbItem* pkgi_db_get(uint32_t index)
     return index < db_item_count ? db_item[index] : NULL;
 }
 
+/* ---- Multi-select (PKGi Remastered) ----
+ * Selection flags live on the DbItem structs themselves so they
+ * survive re-sorting and re-filtering of the visible list. */
+static uint32_t selected_total;
+
+int pkgi_db_is_selected(uint32_t index)
+{
+    DbItem* item = pkgi_db_get(index);
+    return item && item->marked;
+}
+
+void pkgi_db_toggle_select(uint32_t index)
+{
+    DbItem* item = pkgi_db_get(index);
+    if (!item)
+        return;
+    item->marked = !item->marked;
+    selected_total += item->marked ? 1 : (uint32_t)-1;
+}
+
+void pkgi_db_clear_selection(void)
+{
+    for (uint32_t i = 0; i < db_count; i++)
+        db[i].marked = 0;
+    selected_total = 0;
+}
+
+uint32_t pkgi_db_selected_count(void)
+{
+    return selected_total;
+}
+
 GameRegion pkgi_get_region(const char* content)
 {
     switch (content[0])

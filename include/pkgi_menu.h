@@ -11,6 +11,7 @@ typedef enum {
     MenuResultCancel,
     MenuResultRefresh,
     MenuResultLoadConfig,
+    MenuResultEditFolder,
 } MenuResult;
 
 int pkgi_menu_is_open(void);

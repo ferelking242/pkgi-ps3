@@ -120,6 +120,7 @@ void pkgi_load_config(Config* config, char* refresh_url, uint32_t refresh_len)
     config->music = 1;
     config->content = 0;
     config->allow_refresh = 0;
+    config->download_folder[0] = 0;
     pkgi_strncpy(config->language, 3, pkgi_get_user_language());
 
     char data[4096];
@@ -210,6 +211,17 @@ void pkgi_load_config(Config* config, char* refresh_url, uint32_t refresh_len)
             else if (pkgi_stricmp(key, "language") == 0)
             {
                 pkgi_strncpy(config->language, 2, value);
+            }
+            else if (pkgi_stricmp(key, "download_folder") == 0)
+            {
+                /* Custom download folder (PKGi Remastered). Must be an
+                 * absolute /dev_hdd0 path; anything else is ignored. */
+                char prefix[16];
+                pkgi_strncpy(prefix, sizeof(prefix), value + 1);
+                prefix[8] = 0;
+                if (value[0] == '/' && pkgi_stricmp(prefix, "dev_hdd0") == 0)
+                    pkgi_strncpy(config->download_folder,
+                                 sizeof(config->download_folder), value);
             }
         }
     }
@@ -551,6 +563,12 @@ void pkgi_save_config(const Config* config, const char* update_url, uint32_t upd
     if (!config->music)
     {
         len += pkgi_snprintf(data + len, sizeof(data) - len, "no_music 1\n");
+    }
+
+    if (config->download_folder[0])
+    {
+        len += pkgi_snprintf(data + len, sizeof(data) - len, "download_folder %s\n",
+                             config->download_folder);
     }
 
     char path[256];

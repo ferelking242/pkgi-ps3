@@ -75,6 +75,7 @@ typedef struct {
     const char* title_id;   /* NPS title id when available, else "" */
     const char* region;     /* raw region string when available, else "" */
     const char* last_mod;   /* last modification date when available */
+    uint8_t marked;         /* multi-select flag (PKGi Remastered) */
 } DbItem;
 
 typedef enum {
@@ -95,12 +96,19 @@ typedef struct Config {
     uint8_t music;
     uint8_t allow_refresh;
     char language[3];
+    char download_folder[128]; /* custom temp dir (PKGi Remastered) */
 } Config;
 
 
 /* Set a per-content-type database format hint from config.txt
  * (db_format_<tag> = nps | pkgi). Legacy dbformat.txt still wins. */
 void pkgi_db_set_format_hint(int content_id, const char* fmt);
+
+/* Multi-select (PKGi Remastered): mark/get items of the filtered list. */
+int pkgi_db_is_selected(uint32_t index);
+void pkgi_db_toggle_select(uint32_t index);
+void pkgi_db_clear_selection(void);
+uint32_t pkgi_db_selected_count(void);
 
 int pkgi_db_reload(char* error, uint32_t error_size);
 int pkgi_db_update(const char* update_url, uint32_t update_len, char* error, uint32_t error_size);

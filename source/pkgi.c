@@ -40,6 +40,7 @@ static int bottom_y;
 
 static char search_text[256];
 static char error_state[256];
+static int osk_target_folder; /* PKGi Remastered: OSK edits download folder */
 
 static void reposition(void);
 
@@ -134,6 +135,82 @@ static void pkgi_download_thread(void)
     state = StateMain;
 
     pkgi_thread_exit();
+}
+
+/* ---- Batch download (PKGi Remastered) ----
+ * Downloads every marked item in sequence. In direct mode each
+ * finished download is installed right away (download + auto install);
+ * in background mode the PKG is queued as an install task.
+ * One failed item does not stop the queue; a summary is shown. */
+static void pkgi_batch_thread(void)
+{
+    uint32_t done = 0, failed = 0, total = pkgi_db_selected_count();
+    uint32_t current = 0;
+
+    LOG("batch download thread start (%u items)", total);
+
+    pkgi_sleep(300);
+    pkgi_lock_process();
+
+    for (current = 0; current < pkgi_db_total(); current++)
+    {
+        DbItem* item = pkgi_db_get(current);
+        if (!item || !item->marked)
+            continue;
+
+        if (state == StateTerminate)
+            break;
+
+        char title[192];
+        pkgi_snprintf(title, sizeof(title), _("Batch %u/%u"), done + failed + 1, total);
+
+        pkgi_dialog_start_progress(title, item->name, 0);
+        pkgi_dialog_allow_close(0);
+
+        if (pkgi_check_free_space(item->size))
+        {
+            item->presence = PresenceMissing;
+            if (pkgi_download(item, config.dl_mode_background))
+            {
+                done++;
+                if (!config.dl_mode_background)
+                {
+                    install(item->content);
+                }
+            }
+            else if (!pkgi_dialog_is_cancelled())
+            {
+                failed++;
+                pkgi_dialog_error(item->name);
+                pkgi_sleep(500);
+            }
+            else
+            {
+                break; /* user cancelled the queue */
+            }
+        }
+        else
+        {
+            failed++;
+            pkgi_sleep(500);
+        }
+    }
+
+    pkgi_unlock_process();
+    pkgi_db_clear_selection();
+
+    char summary[192];
+    pkgi_snprintf(summary, sizeof(summary), _("%u downloaded, %u failed"), done, failed);
+    pkgi_dialog_message(_("Batch download"), summary);
+
+    state = StateMain;
+    pkgi_thread_exit();
+}
+
+static void pkgi_start_batch(void)
+{
+    state = StateMain;
+    pkgi_start_thread("batch_thread", &pkgi_batch_thread);
 }
 
 static uint32_t friendly_size(uint64_t size)
@@ -270,9 +347,39 @@ static void pkgi_do_main(pkgi_input* input)
         if (input->active & PKGI_BUTTON_SELECT)
         {
             input->pressed &= ~PKGI_BUTTON_SELECT;
-            pkgi_dialog_message("\xE2\x98\x85  PKGi PS3 v" PKGI_VERSION "  \xE2\x98\x85",
-                                "             PlayStation 3 version by Bucanero\n\n"
-                                "           https://github.com/bucanero/pkgi-ps3/");
+
+            /* PKGi Remastered: SELECT toggles selection mode. In
+             * selection mode SELECT marks/unmarks the highlighted
+             * item; hold SELECT and press START to launch the batch. */
+            static int select_mode;
+            if (select_mode)
+            {
+                select_mode = 0;
+                pkgi_db_clear_selection();
+                pkgi_dialog_message(_("Selection"), _("Selection cleared"));
+            }
+            else
+            {
+                select_mode = 1;
+                pkgi_db_toggle_select(selected_item);
+                pkgi_dialog_message(_("Selection"), _("Mark items with SELECT, download with START"));
+            }
+        }
+
+        if (input->active & PKGI_BUTTON_START)
+        {
+            input->pressed &= ~PKGI_BUTTON_START;
+
+            uint32_t marked = pkgi_db_selected_count();
+            if (marked > 0)
+            {
+                pkgi_start_batch();
+            }
+            else
+            {
+                pkgi_dialog_message(_("Selection"),
+                    _("Nothing selected. Mark items with SELECT first."));
+            }
         }
 
         if (input->active & PKGI_BUTTON_L2)
@@ -404,7 +511,13 @@ static void pkgi_do_main(pkgi_input* input)
         int sizew = pkgi_text_width(size_str);
 
         pkgi_clip_set(0, y, VITA_WIDTH, line_height);
-        pkgi_draw_text(col_titleid, y, color, titleid);
+
+        /* PKGi Remastered: selection marker before the Title ID */
+        if (pkgi_db_is_selected(i))
+        {
+            pkgi_draw_text(col_titleid, y, PKGI_COLOR_ACCENT, "\x04");
+        }
+        pkgi_draw_text(col_titleid + pkgi_text_width("\x04"), y, color, titleid);
         const char* region;
         switch (pkgi_get_region(item->content))
         {
@@ -595,7 +708,17 @@ static void pkgi_do_tail(void)
     }
     else
     {
-        pkgi_snprintf(text, sizeof(text), "%s %s  " PKGI_UTF8_T " %s  " PKGI_UTF8_S " %s  %s %s", pkgi_get_ok_str(), _("Download"), _("Menu"), _("Details"), pkgi_get_cancel_str(), _("Exit"));
+        uint32_t marked = pkgi_db_selected_count();
+        if (marked > 0)
+        {
+            char sel[64];
+            pkgi_snprintf(sel, sizeof(sel), _("%u selected"), marked);
+            pkgi_snprintf(text, sizeof(text), "%s - START: %s", sel, _("Download all"));
+        }
+        else
+        {
+            pkgi_snprintf(text, sizeof(text), "%s %s  " PKGI_UTF8_T " %s  " PKGI_UTF8_S " %s  SELECT %s  %s %s", pkgi_get_ok_str(), _("Download"), _("Menu"), _("Details"), _("Selection"), pkgi_get_cancel_str(), _("Exit"));
+        }
     }
 
     pkgi_clip_set(left, bottom_y, VITA_WIDTH - right - left, VITA_HEIGHT - bottom_y);
@@ -716,6 +839,7 @@ int main(int argc, const char* argv[])
     }
 
     pkgi_load_config(&config, (char*) &refresh_url, sizeof(refresh_url[0]));
+    pkgi_set_download_folder(config.download_folder[0] ? config.download_folder : NULL);
     if (config.music)
     {
         pkgi_start_music();
@@ -789,10 +913,36 @@ int main(int argc, const char* argv[])
 
         if (pkgi_dialog_input_update())
         {
-            search_active = 1;
-            pkgi_dialog_input_get_text(search_text, sizeof(search_text));
-            pkgi_db_configure(search_text, &config);
-            reposition();
+            char input_text[256];
+            pkgi_dialog_input_get_text(input_text, sizeof(input_text));
+
+            if (osk_target_folder)
+            {
+                /* PKGi Remastered: OSK was opened for the download folder. */
+                osk_target_folder = 0;
+
+                if (input_text[0] == '/' && strstr(input_text, "dev_hdd0") == input_text + 1)
+                {
+                    pkgi_strncpy(config.download_folder, sizeof(config.download_folder), input_text);
+                    pkgi_set_download_folder(config.download_folder);
+                    pkgi_mkdirs(config.download_folder);
+                    pkgi_save_config(&config, (char*)&refresh_url, sizeof(refresh_url[0]));
+                    pkgi_dialog_message(_("Download folder"), input_text);
+                }
+                else
+                {
+                    pkgi_set_download_folder(NULL);
+                    config.download_folder[0] = 0;
+                    pkgi_dialog_error(_("Invalid folder: must be an absolute /dev_hdd0 path"));
+                }
+            }
+            else
+            {
+                search_active = 1;
+                pkgi_strncpy(search_text, sizeof(search_text), input_text);
+                pkgi_db_configure(search_text, &config);
+                reposition();
+            }
         }
 
         if (pkgi_menu_is_open())
@@ -844,6 +994,14 @@ int main(int argc, const char* argv[])
                 {
                     pkgi_menu_get(&config);
                     pkgi_save_config(&config, (char*) &refresh_url, sizeof(refresh_url[0]));
+                }
+                else if (mres == MenuResultEditFolder)
+                {
+                    /* PKGi Remastered: ask the new download folder via
+                     * the on-screen keyboard, validate, apply. */
+                    osk_target_folder = 1;
+                    pkgi_dialog_input_text(_("Download folder"),
+                        config.download_folder[0] ? config.download_folder : PKGI_TMP_FOLDER);
                 }
                 else if (mres == MenuResultRefresh)
                 {

@@ -27,7 +27,8 @@ typedef enum {
     MenuUpdate,
     MenuMusic,
     MenuContent,
-    MenuLoadConfig
+    MenuLoadConfig,
+    MenuFolder
 } MenuType;
 
 typedef struct {
@@ -62,6 +63,7 @@ static MenuEntry menu_entries[] =
     { MenuUpdate, "Updates", 1 },
 
     { MenuLoadConfig, "Load configuration", 0 },
+    { MenuFolder, "Download folder", 0 },
     { MenuRefresh, "Refresh...", 0 },
 };
 
@@ -129,7 +131,8 @@ void pkgi_menu_start(int search_clear, const Config* config)
     menu_entries[16].text = _("Music");
     menu_entries[17].text = _("Updates");
     menu_entries[18].text = _("Load configuration");
-    menu_entries[19].text = _("Refresh...");
+    menu_entries[19].text = _("Download folder");
+    menu_entries[20].text = _("Refresh...");
 
     content_entries[0].text = _("All");
     content_entries[1].text = _("Games");
@@ -248,6 +251,12 @@ int pkgi_do_menu(pkgi_input* input)
             menu_delta = -1;
             return 1;
         }
+        else if (type == MenuFolder)
+        {
+            menu_result = MenuResultEditFolder;
+            menu_delta = -1;
+            return 1;
+        }
         else if (type == MenuSort)
         {
             DbSort value = (DbSort)menu_entries[menu_selected].value;
@@ -317,7 +326,7 @@ int pkgi_do_menu(pkgi_input* input)
             }
             y += font_height;
         }
-        else if (type == MenuLoadConfig)
+        else if (type == MenuLoadConfig || type == MenuFolder)
         {
             y += font_height;
         }
