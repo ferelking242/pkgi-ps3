@@ -11,6 +11,16 @@
 #include <libxml/tree.h>
 
 #define MAX_DB_SIZE (32*1024*1024)
+
+/* Format hint from config.txt (db_format_<tag>), empty = not set. */
+static char g_config_db_format[MAX_CONTENT_TYPES][16];
+
+void pkgi_db_set_format_hint(int content_id, const char* fmt)
+{
+    if (content_id < 0 || content_id >= MAX_CONTENT_TYPES || !fmt)
+        return;
+    pkgi_strncpy(g_config_db_format[content_id], sizeof(g_config_db_format[0]), fmt);
+}
 #define MAX_DB_ITEMS 0x20000
 #define MAX_DB_COLUMNS 32
 
@@ -36,6 +46,9 @@ typedef enum {
     ColumnUrl,
     ColumnSize,
     ColumnChecksum,
+    ColumnTitleId,
+    ColumnRegion,
+    ColumnLastMod,
     ColumnUnknown
 } ColumnType;
 
@@ -62,6 +75,9 @@ static ColumnEntry entries[] =
     { ColumnUrl, "url", "" },
     { ColumnSize, "size", "" },
     { ColumnChecksum, "checksum", "" },
+    { ColumnTitleId, "titleid", "" },
+    { ColumnRegion, "region", "" },
+    { ColumnLastMod, "lastmod", "" },
 };
 
 static const ColumnType default_format[] =
@@ -76,15 +92,32 @@ static const ColumnType default_format[] =
     ColumnChecksum
 };
 
-static const ColumnType external_format[] =
+/* NPS TSV layout (nopaystation.com):
+   Title ID | Region | Name | URL | RAP | CONTENT ID |
+   Last Modification Date | Download .RAP file | Size | Checksum */
+static const ColumnType nps_format[] =
 {
-    ColumnUnknown,
-    ColumnUnknown,
+    ColumnTitleId,
+    ColumnRegion,
     ColumnName,
     ColumnUrl,
     ColumnRap,
     ColumnContentId,
+    ColumnLastMod,
     ColumnUnknown,
+    ColumnSize,
+    ColumnChecksum
+};
+
+static const ColumnType external_format[] =
+{
+    ColumnUnknown,
+    ColumnRegion,
+    ColumnName,
+    ColumnUrl,
+    ColumnRap,
+    ColumnContentId,
+    ColumnLastMod,
     ColumnUnknown,
     ColumnSize,
     ColumnChecksum
@@ -204,6 +237,7 @@ static int load_database(uint8_t db_id)
 {
     uint8_t column = 0;
     dbFormat dbf = { ',', 8, (ColumnType*)default_format, entries };
+    int used_config_format = 0;
 
     char path[256];
     pkgi_snprintf(path, sizeof(path), "%s/dbformat.txt", pkgi_get_config_folder());
@@ -219,15 +253,7 @@ static int load_database(uint8_t db_id)
         LOG("loading format from %s", path);
 
         dbf.delimiter = *ptr++;
-
-        if (ptr < end && *ptr == '\r')
-        {
-            ptr++;
-        }
-        if (ptr < end && *ptr == '\n')
-        {
-            ptr++;
-        }
+        used_config_format = 1;
 
         while (ptr < end && *ptr)
         {
@@ -252,6 +278,24 @@ static int load_database(uint8_t db_id)
         dbf.total_columns = column;
         dbf.type = types;
     }
+    else if (g_config_db_format[0] != 0)
+    {
+        /* Format declared in config.txt via db_format_<tag> = "nps" or
+         * "pkgi". Legacy dbformat.txt wins when both exist. */
+        if (pkgi_stricmp(g_config_db_format, "nps") == 0)
+        {
+            dbf.delimiter = '\t';
+            dbf.total_columns = 10;
+            dbf.type = (ColumnType*)nps_format;
+        }
+        else if (pkgi_stricmp(g_config_db_format, "pkgi") == 0)
+        {
+            dbf.delimiter = ',';
+            dbf.total_columns = 8;
+            dbf.type = (ColumnType*)default_format;
+        }
+        used_config_format = 1;
+    }
 
     pkgi_snprintf(path, sizeof(path), "%s/pkgi%s.txt", pkgi_get_config_folder(), pkgi_content_tag(db_id));
 
@@ -269,6 +313,27 @@ static int load_database(uint8_t db_id)
             dbf.delimiter = '\t';
             dbf.total_columns = 10;
             dbf.type = (ColumnType*) external_format;
+        }
+        else if (!used_config_format)
+        {
+            /* Auto-detect the NPS TSV layout: tab-delimited, 10 columns,
+             * first field looks like a Title ID (9 chars, letter + 4 digits
+             * + 4 more). Only when no explicit format was declared. */
+            const char* p = (const char*)db_data + db_size;
+            int tabs = 0;
+            while (*p && *p != '\n' && *p != '\r')
+            {
+                if (*p == '\t')
+                    tabs++;
+                p++;
+            }
+            if (tabs == 9)
+            {
+                dbf.delimiter = '\t';
+                dbf.total_columns = 10;
+                dbf.type = (ColumnType*)nps_format;
+                LOG("auto-detected NPS TSV format");
+            }
         }
     }
     else
@@ -317,6 +382,9 @@ static int load_database(uint8_t db_id)
             db[db_count].url = dbf.data[ColumnUrl].data;
             db[db_count].size = pkgi_strtoll(dbf.data[ColumnSize].data);
             db[db_count].digest = pkgi_hexbytes(dbf.data[ColumnChecksum].data, SHA256_DIGEST_SIZE);
+            db[db_count].title_id = dbf.data[ColumnTitleId].data;
+            db[db_count].region = dbf.data[ColumnRegion].data;
+            db[db_count].last_mod = dbf.data[ColumnLastMod].data;
             db_item[db_count] = db + db_count;
             db_count++;
         }

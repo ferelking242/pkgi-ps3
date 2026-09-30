@@ -850,6 +850,42 @@ int main(int argc, const char* argv[])
                     state = StateRefreshing;
                     pkgi_start_thread("refresh_thread", &pkgi_refresh_thread);
                 }
+                else if (mres == MenuResultLoadConfig)
+                {
+                    /* Load the first available profile (transactional:
+                     * on failure the current config stays untouched). */
+                    if (pkgi_config_profile_count() > 0)
+                    {
+                        Config old_config = config;
+                        char old_urls[MAX_CONTENT_TYPES][256];
+                        pkgi_memcpy(old_urls, &refresh_url, sizeof(old_urls));
+
+                        char cfg_error[192];
+                        char cfg_ok[224];
+                        const char* name = pkgi_config_profile_name(0);
+                        if (pkgi_config_load_profile(name, &config,
+                                (char*)&refresh_url, sizeof(refresh_url[0]),
+                                cfg_error, sizeof(cfg_error)))
+                        {
+                            pkgi_snprintf(cfg_ok, sizeof(cfg_ok),
+                                "%s: %s", _("Loaded configuration"), name);
+                            pkgi_dialog_message(_("Configuration"), cfg_ok);
+                            state = StateRefreshing;
+                            pkgi_start_thread("refresh_thread", &pkgi_refresh_thread);
+                        }
+                        else
+                        {
+                            config = old_config;
+                            pkgi_memcpy(&refresh_url, old_urls, sizeof(old_urls));
+                            pkgi_dialog_error(cfg_error);
+                        }
+                    }
+                    else
+                    {
+                        pkgi_dialog_message(_("Configuration"),
+                            _("No configuration profile found in /profiles"));
+                    }
+                }
             }
         }
 

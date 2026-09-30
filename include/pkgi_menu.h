@@ -10,6 +10,7 @@ typedef enum {
     MenuResultAccept,
     MenuResultCancel,
     MenuResultRefresh,
+    MenuResultLoadConfig,
 } MenuResult;
 
 int pkgi_menu_is_open(void);

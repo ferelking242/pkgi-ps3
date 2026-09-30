@@ -26,7 +26,8 @@ typedef enum {
     MenuMode,
     MenuUpdate,
     MenuMusic,
-    MenuContent
+    MenuContent,
+    MenuLoadConfig
 } MenuType;
 
 typedef struct {
@@ -60,6 +61,7 @@ static MenuEntry menu_entries[] =
     { MenuMusic, "Music", 1 },
     { MenuUpdate, "Updates", 1 },
 
+    { MenuLoadConfig, "Load configuration", 0 },
     { MenuRefresh, "Refresh...", 0 },
 };
 
@@ -126,7 +128,8 @@ void pkgi_menu_start(int search_clear, const Config* config)
     menu_entries[15].text = _("Back. DL");
     menu_entries[16].text = _("Music");
     menu_entries[17].text = _("Updates");
-    menu_entries[18].text = _("Refresh...");
+    menu_entries[18].text = _("Load configuration");
+    menu_entries[19].text = _("Refresh...");
 
     content_entries[0].text = _("All");
     content_entries[1].text = _("Games");
@@ -183,7 +186,7 @@ int pkgi_do_menu(pkgi_input* input)
             {
                 menu_selected--;
             }
-        } while (menu_entries[menu_selected].type == MenuText
+        }        while (menu_entries[menu_selected].type == MenuText
             || (menu_entries[menu_selected].type == MenuSearchClear && !menu_search_clear)
             || (menu_entries[menu_selected].type == MenuRefresh && !menu_allow_refresh));
     }
@@ -203,6 +206,7 @@ int pkgi_do_menu(pkgi_input* input)
             || (menu_entries[menu_selected].type == MenuSearchClear && !menu_search_clear)
             || (menu_entries[menu_selected].type == MenuRefresh && !menu_allow_refresh));
     }
+
 
     if (input->pressed & pkgi_cancel_button())
     {
@@ -235,6 +239,12 @@ int pkgi_do_menu(pkgi_input* input)
         else if (type == MenuRefresh)
         {
             menu_result = MenuResultRefresh;
+            menu_delta = -1;
+            return 1;
+        }
+        else if (type == MenuLoadConfig)
+        {
+            menu_result = MenuResultLoadConfig;
             menu_delta = -1;
             return 1;
         }
@@ -305,6 +315,10 @@ int pkgi_do_menu(pkgi_input* input)
             {
                 continue;
             }
+            y += font_height;
+        }
+        else if (type == MenuLoadConfig)
+        {
             y += font_height;
         }
 

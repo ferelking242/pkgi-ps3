@@ -72,6 +72,9 @@ typedef struct {
     const char* url;
     const uint8_t* digest;
     int64_t size;
+    const char* title_id;   /* NPS title id when available, else "" */
+    const char* region;     /* raw region string when available, else "" */
+    const char* last_mod;   /* last modification date when available */
 } DbItem;
 
 typedef enum {
@@ -94,6 +97,10 @@ typedef struct Config {
     char language[3];
 } Config;
 
+
+/* Set a per-content-type database format hint from config.txt
+ * (db_format_<tag> = nps | pkgi). Legacy dbformat.txt still wins. */
+void pkgi_db_set_format_hint(int content_id, const char* fmt);
 
 int pkgi_db_reload(char* error, uint32_t error_size);
 int pkgi_db_update(const char* update_url, uint32_t update_len, char* error, uint32_t error_size);
