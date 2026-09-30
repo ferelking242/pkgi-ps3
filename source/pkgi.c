@@ -355,6 +355,19 @@ static void pkgi_do_main(pkgi_input* input)
     
     if (input)
     {
+        if (pkgi_dialog_is_background())
+        {
+            /* Keep list navigation available, but don't replace the active
+             * download dialog with another action or confirmation. L2 is
+             * reserved to restore that dialog. */
+            input->pressed &= ~(pkgi_cancel_button() | pkgi_ok_button() |
+                                PKGI_BUTTON_SELECT | PKGI_BUTTON_START |
+                                PKGI_BUTTON_T | PKGI_BUTTON_S);
+            input->active &= ~(pkgi_cancel_button() | PKGI_BUTTON_SELECT |
+                               PKGI_BUTTON_START | PKGI_BUTTON_L2 |
+                               PKGI_BUTTON_T | PKGI_BUTTON_S);
+        }
+
         if (input->active & pkgi_cancel_button())
         {
             input->pressed &= ~pkgi_cancel_button();
@@ -675,6 +688,18 @@ static void pkgi_do_head(void)
     int rightw = pkgi_text_width(battery);
     pkgi_draw_text(VITA_WIDTH - PKGI_MAIN_HLINE_EXTRA - (rightw + PKGI_MAIN_HMARGIN), PKGI_MAIN_VMARGIN, color, battery);
 
+    float download_progress = 0.f;
+    if (pkgi_dialog_background_progress(&download_progress))
+    {
+        char percent[16];
+        pkgi_snprintf(percent, sizeof(percent), "%.0f%%", download_progress * 100.f);
+        int x = VITA_WIDTH / 2 + 30;
+        int y = PKGI_MAIN_VMARGIN + font_height / 2;
+        pkgi_draw_fill_rect(x, y, 76, 5, PKGI_COLOR_PROGRESS_BACKGROUND);
+        pkgi_draw_fill_rect(x, y, (int)(76 * download_progress), 5, PKGI_COLOR_PROGRESS_BAR);
+        pkgi_draw_text(x + 84, PKGI_MAIN_VMARGIN, PKGI_COLOR_ACCENT, percent);
+    }
+
     if (search_active)
     {
         char text[256];
@@ -913,6 +938,13 @@ int main(int argc, const char* argv[])
     pkgi_input input = {0, 0, 0, 0};
     while (pkgi_update(&input) && (state != StateTerminate))
     {
+        if (pkgi_dialog_is_background() && (input.pressed & PKGI_BUTTON_L2))
+        {
+            pkgi_dialog_restore_background();
+            input.pressed &= ~PKGI_BUTTON_L2;
+            input.active &= ~PKGI_BUTTON_L2;
+        }
+
         pkgi_draw_background(background);
 
         if (state == StateUpdateDone)
@@ -939,7 +971,8 @@ int main(int argc, const char* argv[])
             break;
 
         case StateMain:
-            pkgi_do_main(pkgi_dialog_is_open() || pkgi_menu_is_open() ? NULL : &input);
+            pkgi_do_main((pkgi_dialog_is_open() && !pkgi_dialog_is_background()) ||
+                         pkgi_menu_is_open() ? NULL : &input);
             break;
 
         default:

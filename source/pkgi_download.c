@@ -239,7 +239,9 @@ static int update_progress(void *p, int64_t dltotal, int64_t dlnow, int64_t ulto
         else
         {
             // report download speed
-            uint32_t speed = (uint32_t)(((download_offset - initial_offset) * 1000) / (info_now - info_start));
+            uint32_t elapsed = info_now > info_start ? info_now - info_start : 1;
+            uint64_t received = download_offset >= initial_offset ? download_offset - initial_offset : 0;
+            uint32_t speed = (uint32_t)((received * 1000) / elapsed);
             if (speed > 10 * 1000 * 1024)
             {
                 pkgi_snprintf(dialog_extra, sizeof(dialog_extra), "%u %s/s", speed / 1024 / 1024, _("MB"));
@@ -259,6 +261,7 @@ static int update_progress(void *p, int64_t dltotal, int64_t dlnow, int64_t ulto
         float percent = total_size ? (float)((double)download_offset / total_size) : 0.f;
 
         pkgi_dialog_update_progress(text, dialog_extra, dialog_eta, percent);
+        pkgi_dialog_update_progress_size(download_offset, total_size);
         info_update = info_now + 500;
     }
 
@@ -629,6 +632,7 @@ int pkgi_download(const DbItem* item, const int background_dl)
 
     dialog_extra[0] = 0;
     dialog_eta[0] = 0;
+    pkgi_dialog_update_progress_size(0, 0);
     info_start = pkgi_time_msec();
     info_update = info_start + 1000;
 

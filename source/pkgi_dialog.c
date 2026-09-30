@@ -20,9 +20,11 @@ static char dialog_title[256];
 static char dialog_text[256];
 static char dialog_extra[256];
 static char dialog_eta[256];
+static char dialog_size[96];
 static float dialog_progress;
 static int dialog_allow_close;
 static int dialog_cancelled;
+static int dialog_background;
 static pkgi_texture pkg_icon = NULL;
 static DbItem* db_item = NULL;
 static pkgi_dialog_callback_t dialog_callback = NULL;
@@ -38,6 +40,7 @@ void pkgi_dialog_init(void)
 {
     dialog_type = DialogNone;
     dialog_allow_close = 1;
+    dialog_background = 0;
 }
 
 int pkgi_dialog_is_open(void)
@@ -48,6 +51,33 @@ int pkgi_dialog_is_open(void)
 int pkgi_dialog_is_cancelled(void)
 {
     return dialog_cancelled;
+}
+
+int pkgi_dialog_is_background(void)
+{
+    int background;
+    pkgi_dialog_lock();
+    background = dialog_background && dialog_type == DialogProgress;
+    pkgi_dialog_unlock();
+    return background;
+}
+
+int pkgi_dialog_background_progress(float* progress)
+{
+    int background;
+    pkgi_dialog_lock();
+    background = dialog_background && dialog_type == DialogProgress;
+    if (background && progress)
+        *progress = dialog_progress;
+    pkgi_dialog_unlock();
+    return background;
+}
+
+void pkgi_dialog_restore_background(void)
+{
+    pkgi_dialog_lock();
+    dialog_background = 0;
+    pkgi_dialog_unlock();
 }
 
 void pkgi_dialog_allow_close(int allow)
@@ -63,8 +93,10 @@ void pkgi_dialog_data_init(DialogType type, const char* title, const char* text)
     pkgi_strncpy(dialog_text, sizeof(dialog_text), text);
     dialog_extra[0] = 0;
     dialog_eta[0] = 0;
+    dialog_size[0] = 0;
 
     dialog_cancelled = 0;
+    dialog_background = 0;
     dialog_type = type;
     dialog_delta = 1;
 }
@@ -163,6 +195,31 @@ void pkgi_dialog_update_progress(const char* text, const char* extra, const char
     pkgi_dialog_unlock();
 }
 
+void pkgi_dialog_update_progress_size(uint64_t downloaded, uint64_t total)
+{
+    char downloaded_text[32];
+    char total_text[32];
+    char size_text[96];
+
+    if (!total)
+    {
+        size_text[0] = 0;
+    }
+    else
+    {
+        if (downloaded == 0)
+            pkgi_strncpy(downloaded_text, sizeof(downloaded_text), "0 B");
+        else
+            pkgi_friendly_size(downloaded_text, sizeof(downloaded_text), (int64_t)downloaded);
+        pkgi_friendly_size(total_text, sizeof(total_text), (int64_t)total);
+        pkgi_snprintf(size_text, sizeof(size_text), "%s / %s", downloaded_text, total_text);
+    }
+
+    pkgi_dialog_lock();
+    pkgi_strncpy(dialog_size, sizeof(dialog_size), size_text);
+    pkgi_dialog_unlock();
+}
+
 void pkgi_dialog_close(void)
 {
     dialog_delta = -1;
@@ -181,6 +238,12 @@ void pkgi_do_dialog(pkgi_input* input)
         else if ((dialog_type == DialogProgress || dialog_type == DialogOkCancel) && (input->pressed & pkgi_cancel_button()))
         {
             dialog_cancelled = 1;
+        }
+        else if (dialog_type == DialogProgress && (input->pressed & PKGI_BUTTON_LT))
+        {
+            dialog_background = 1;
+            input->pressed &= ~PKGI_BUTTON_LT;
+            input->active &= ~PKGI_BUTTON_LT;
         }
         else if (dialog_type == DialogOkCancel && (input->pressed & pkgi_ok_button()))
         {
@@ -218,6 +281,8 @@ void pkgi_do_dialog(pkgi_input* input)
             dialog_text[0] = 0;
             dialog_extra[0] = 0;
             dialog_eta[0] = 0;
+            dialog_size[0] = 0;
+            dialog_background = 0;
 
             dialog_width = 0;
             dialog_height = 0;
@@ -248,8 +313,10 @@ void pkgi_do_dialog(pkgi_input* input)
     char local_text[256];
     char local_extra[256];
     char local_eta[256];
+    char local_size[96];
     float local_progress = dialog_progress;
     int local_allow_close = dialog_allow_close;
+    int local_background = dialog_background;
     int32_t local_width = dialog_width;
     int32_t local_height = dialog_height;
 
@@ -257,13 +324,21 @@ void pkgi_do_dialog(pkgi_input* input)
     pkgi_strncpy(local_text, sizeof(local_text), dialog_text);
     pkgi_strncpy(local_extra, sizeof(local_extra), dialog_extra);
     pkgi_strncpy(local_eta, sizeof(local_eta), dialog_eta);
+    pkgi_strncpy(local_size, sizeof(local_size), dialog_size);
 
     pkgi_dialog_unlock();
 
-    if (local_width != 0 && local_height != 0)
+    if (local_background && local_type == DialogProgress)
+        return;
+
+    if (local_width > 20 && local_height > 20)
     {
-        pkgi_draw_fill_rect_z((VITA_WIDTH - local_width) / 2, (VITA_HEIGHT - local_height) / 2, PKGI_MENU_Z, local_width, local_height, PKGI_COLOR_MENU_BACKGROUND);
-        pkgi_draw_rect_z((VITA_WIDTH - local_width) / 2, (VITA_HEIGHT - local_height) / 2, PKGI_MENU_Z, local_width, local_height, PKGI_COLOR_MENU_BORDER);
+        int x = (VITA_WIDTH - local_width) / 2;
+        int y = (VITA_HEIGHT - local_height) / 2;
+        pkgi_draw_fill_rect_z(x + 4, y + 6, PKGI_MENU_Z - 2, local_width, local_height, PKGI_COLOR_DIALOG_SHADOW);
+        pkgi_draw_fill_rect_z(x, y, PKGI_MENU_Z - 1, local_width, local_height, PKGI_COLOR_DIALOG_EDGE);
+        pkgi_draw_fill_rect_z(x + 2, y + 2, PKGI_MENU_Z, local_width - 4, local_height - 4, PKGI_COLOR_DIALOG_SURFACE);
+        pkgi_draw_fill_rect_z(x + 10, y + 10, PKGI_MENU_Z, 3, local_height - 20, PKGI_COLOR_ACCENT);
     }
 
     if (local_width != PKGI_DIALOG_WIDTH || local_height != PKGI_DIALOG_HEIGHT)
@@ -342,13 +417,22 @@ void pkgi_do_dialog(pkgi_input* input)
 
         if (local_eta[0])
         {
-            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w - (PKGI_DIALOG_PADDING + pkgi_text_width(local_eta)), VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_eta);
+            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING,
+                             VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING,
+                             PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIM, local_eta);
+        }
+        if (local_size[0])
+        {
+            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w - (PKGI_DIALOG_PADDING + pkgi_text_width(local_size)),
+                             VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING,
+                             PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_size);
         }
 
         if (local_allow_close)
         {
             char text[256];
-            pkgi_snprintf(text, sizeof(text), _("press %s to cancel"), pkgi_ok_button() == PKGI_BUTTON_X ? PKGI_UTF8_O : PKGI_UTF8_X);
+            pkgi_snprintf(text, sizeof(text), _("L1: background  %s: cancel"),
+                          pkgi_cancel_button() == PKGI_BUTTON_O ? PKGI_UTF8_O : PKGI_UTF8_X);
             pkgi_draw_text_z((VITA_WIDTH - pkgi_text_width(text)) / 2, PKGI_DIALOG_VMARGIN + h - 2 * font_height, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, text);
         }
     }

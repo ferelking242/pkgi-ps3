@@ -19,6 +19,9 @@ void pkgi_dialog_init(void);
 
 int pkgi_dialog_is_open(void);
 int pkgi_dialog_is_cancelled(void);
+int pkgi_dialog_is_background(void);
+int pkgi_dialog_background_progress(float* progress);
+void pkgi_dialog_restore_background(void);
 void pkgi_dialog_allow_close(int allow);
 void pkgi_dialog_message(const char* title, const char* text);
 void pkgi_dialog_error(const char* text);
@@ -28,6 +31,7 @@ void pkgi_dialog_ok_cancel(const char* title, const char* text, pkgi_dialog_call
 void pkgi_dialog_start_progress(const char* title, const char* text, float progress);
 void pkgi_dialog_set_progress_title(const char* title);
 void pkgi_dialog_update_progress(const char* text, const char* extra, const char* eta, float progress);
+void pkgi_dialog_update_progress_size(uint64_t downloaded, uint64_t total);
 
 void pkgi_dialog_close(void);
 
