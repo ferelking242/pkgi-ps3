@@ -78,6 +78,7 @@ static ColumnEntry entries[] =
     { ColumnTitleId, "titleid", "" },
     { ColumnRegion, "region", "" },
     { ColumnLastMod, "lastmod", "" },
+    { ColumnUnknown, "", "" },
 };
 
 static const ColumnType default_format[] =
@@ -122,6 +123,23 @@ static const ColumnType external_format[] =
     ColumnSize,
     ColumnChecksum
 };
+
+static ColumnType column_type_from_header(const char* name)
+{
+    if (pkgi_stricmp(name, "Title ID") == 0)
+        return ColumnTitleId;
+    if (pkgi_stricmp(name, "Last Modification Date") == 0)
+        return ColumnLastMod;
+
+    for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++)
+    {
+        if (entries[i].type != ColumnUnknown && entries[i].text_id[0] &&
+            pkgi_stricmp(entries[i].text_id, name) == 0)
+            return entries[i].type;
+    }
+
+    return ColumnUnknown;
+}
 
 static uint8_t hexvalue(char ch)
 {
@@ -245,6 +263,8 @@ static int load_database(uint8_t db_id)
     int loaded = pkgi_load(path, db_data, MAX_DB_SIZE - 1);
     if (loaded > 0)
     {
+        /* pkgi_load reads raw bytes and does not add a terminator. */
+        db_data[loaded] = 0;
         char* ptr = db_data;
         char* end = db_data + loaded + 1;
         column = 0;
@@ -253,27 +273,29 @@ static int load_database(uint8_t db_id)
         LOG("loading format from %s", path);
 
         dbf.delimiter = *ptr++;
+        /* The delimiter is on its own line; skip its CR/LF before parsing
+         * the first column name. */
+        if (ptr < end && *ptr == '\r')
+            ptr++;
+        if (ptr < end && *ptr == '\n')
+            ptr++;
         used_config_format = 1;
 
-        while (ptr < end && *ptr)
+        while (ptr < end && *ptr && column < MAX_DB_COLUMNS)
         {
             const char* column_name = ptr;
-            types[column] = ColumnUnknown;
 
-            while (ptr < end && *ptr != dbf.delimiter && *ptr != '\n' && *ptr != '\r' && column < MAX_DB_COLUMNS)
+            while (ptr < end && *ptr != dbf.delimiter && *ptr != '\n' && *ptr != '\r')
             {
                 ptr++;
             }
-            *ptr++ = 0;
-
-            int j;
-            for (j = 0; j < 8; j++) {
-                if (pkgi_stricmp(entries[j].text_id, column_name) == 0) {
-                    types[column] = entries[j].type;
-                }
-            }
-        
+            if (ptr < end)
+                *ptr++ = 0;
+            types[column] = column_type_from_header(column_name);
             column++;
+
+            if (ptr < end && (*ptr == '\r' || *ptr == '\n'))
+                break;
         }
         dbf.total_columns = column;
         dbf.type = types;
@@ -355,6 +377,9 @@ static int load_database(uint8_t db_id)
 
     while (ptr < end && *ptr)
     {
+        for (uint32_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++)
+            entries[i].data = "";
+
         column = 0;
         while (ptr < end && column < dbf.total_columns)
         {
@@ -463,7 +488,8 @@ int pkgi_db_reload(char* error, uint32_t error_size)
 
     if (db_count == 0)
     {
-        pkgi_snprintf(error, error_size, _("ERROR: pkgi.txt file(s) missing or bad config.txt file"));
+        pkgi_snprintf(error, error_size,
+            _("No database loaded. Check config.txt URLs, dbformat.txt, and the network connection."));
         return 0;
     }
     return 1;

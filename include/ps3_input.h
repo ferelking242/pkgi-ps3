@@ -5,8 +5,8 @@
  *
  * Fixes third-party / non-genuine controller issues by:
  *  - scanning every connected port instead of hard-coding port 0;
- *  - validating each padData frame (len > 0 plus the 0x7 frame marker)
- *    before trusting its contents;
+ *  - using libpad's normalized padData fields instead of assuming a
+ *    particular raw report layout or frame marker;
  *  - keeping the last known-good state when no valid frame arrives
  *    (no dead buttons, no ghost inputs, UI never runs unattended);
  *  - adding analog-stick hysteresis so a noisy stick cannot flicker
@@ -14,32 +14,12 @@
  *  - exposing edge detection (pressed/released), held state, and a
  *    time-based controlled repeat for navigation.
  *
- * Button bits reuse the existing PKGI_BUTTON_* values, which are proven
- * to work with genuine DualShock pads through the ya2d/libpad path.
+ * Reported buttons use the PKGI_BUTTON_* masks consumed by the existing UI.
  */
 
 #include <stdint.h>
 
 #define PS3IN_MAX_PORTS 7
-
-/* Hardware button bits (same values as PKGI_BUTTON_*). */
-#define PS3IN_SELECT (1u << 16)
-#define PS3IN_L3     (1u << 1)
-#define PS3IN_R3     (1u << 2)
-#define PS3IN_START  (1u << 3)
-#define PS3IN_UP     (1u << 4)
-#define PS3IN_RIGHT  (1u << 5)
-#define PS3IN_DOWN   (1u << 6)
-#define PS3IN_LEFT   (1u << 7)
-
-#define PS3IN_L2     (1u << 0)
-#define PS3IN_R2     (1u << 1)
-#define PS3IN_L1     (1u << 2)
-#define PS3IN_R1     (1u << 3)
-#define PS3IN_TRIANGLE (1u << 4)
-#define PS3IN_CIRCLE   (1u << 5)
-#define PS3IN_CROSS    (1u << 6)
-#define PS3IN_SQUARE   (1u << 7)
 
 /* UI-facing input events, hardware independent. */
 typedef enum {

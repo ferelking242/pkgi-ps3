@@ -9,11 +9,11 @@ produit et une couche manette corrigée.
 ## Nouveautés de ce fork
 
 ### 🎮 Couche manette refondue
-Le bug bien connu « aucune touche ne répond avec certaines manettes » est corrigé à la
-racine (`source/ps3_input.c`) :
+La couche manette (`source/ps3_input.c`) lit maintenant les champs normalisés par libpad
+et utilise les masques attendus par l'interface :
 - **tous les ports** sont scannés (avant : port 0 codé en dur) ;
-- chaque trame pad est **validée** (`len > 0` + marqueur libpad `0x7`, packing standard
-  ou alterné) — les manettes tierces au format court fonctionnent ;
+- les boutons de navigation, d'action et les gâchettes sont tous transmis à l'interface ;
+- aucune disposition brute de trame ni marqueur `0x7` particulier n'est imposé ;
 - en cas de lecture invalide, l'état connu est conservé, sans événements fantômes ;
 - **hystérésis analogique** (seuils engage/release) : plus de navigation qui scintille ;
 - **répétition temporelle** (350 ms de délai, 110 ms de période) au lieu du compteur
@@ -26,6 +26,8 @@ SELECT = informations.
 ### ⚙️ config.txt modernisé (compatibilité legacy conservée)
 Sans `config.txt`, l'app démarre avec les **URLs NPS par défaut**
 (games/dlcs/themes/avatars/demos), téléchargement en arrière-plan activé, musique coupée.
+Le paquet d'installation inclut maintenant les fichiers `config.txt` et `dbformat.txt`
+fournis avec le projet dans `USRDIR`.
 
 Clé nouvelle : `db_format_<tag> = nps | pkgi` (par type de contenu).
 

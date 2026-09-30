@@ -690,14 +690,13 @@ int pkgi_update(pkgi_input* input)
 
     /*
      * PKGi Remastered: robust input layer (see ps3_input.c).
-     * Multi-port scan, frame validation, analog hysteresis and
+     * Multi-port scan, normalized padData mapping, analog hysteresis and
      * time-based repeat. The legacy pkgi_input fields (pressed /
      * down / active) are kept in sync so the existing UI code and
      * dialogs keep working unchanged.
      */
     static pkgi_ui_input ui;
 
-    uint32_t previous = input->down;
     /* input->delta is milliseconds; the input layer works in µs. */
     ps3in_poll((uint64_t)input->delta * 1000u, &ui);
 
@@ -711,10 +710,10 @@ int pkgi_update(pkgi_input* input)
     {
         switch (ui.event)
         {
-        case UI_INPUT_UP:    input->active = PS3IN_UP;    break;
-        case UI_INPUT_DOWN:  input->active = PS3IN_DOWN;  break;
-        case UI_INPUT_LEFT:  input->active = PS3IN_LEFT;  break;
-        case UI_INPUT_RIGHT: input->active = PS3IN_RIGHT; break;
+        case UI_INPUT_UP:    input->active = PKGI_BUTTON_UP;    break;
+        case UI_INPUT_DOWN:  input->active = PKGI_BUTTON_DOWN;  break;
+        case UI_INPUT_LEFT:  input->active = PKGI_BUTTON_LEFT;  break;
+        case UI_INPUT_RIGHT: input->active = PKGI_BUTTON_RIGHT; break;
         default: break;
         }
     }

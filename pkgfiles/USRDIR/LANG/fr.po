@@ -116,8 +116,8 @@ msgstr "liste trop volumineuse... vérifiez une version plus récente de pkgi !"
 msgid "list is empty... check the DB server"
 msgstr "liste vide... vérifiez le serveur de base de données"
 
-msgid "ERROR: pkgi.txt file(s) missing or bad config.txt file"
-msgstr "ERREUR : fichier(s) pkgi.txt manquant(s) ou config.txt invalide"
+msgid "No database loaded. Check config.txt URLs, dbformat.txt, and the network connection."
+msgstr "Aucune base de données chargée. Vérifiez les URL de config.txt, dbformat.txt et la connexion réseau."
 
 msgid "Content"
 msgstr "Contenu"
