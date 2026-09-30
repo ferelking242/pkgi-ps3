@@ -728,7 +728,39 @@ static void pkgi_do_tail(void)
 
 static void pkgi_do_error(void)
 {
-    pkgi_draw_text((VITA_WIDTH - pkgi_text_width(error_state)) / 2, VITA_HEIGHT / 2, PKGI_COLOR_TEXT_ERROR, error_state);
+    const char* text = error_state;
+    const int line_height = PKGI_FONT_HEIGHT + 2;
+    int line_count = 1;
+
+    for (const char* p = error_state; *p; p++)
+    {
+        if (*p == '\n')
+            line_count++;
+    }
+
+    int y = (VITA_HEIGHT - line_count * line_height) / 2;
+    while (*text)
+    {
+        char line[sizeof(error_state)];
+        uint32_t length = 0;
+
+        while (text[length] && text[length] != '\n' &&
+               length < sizeof(line) - 1)
+        {
+            line[length] = text[length];
+            length++;
+        }
+        line[length] = 0;
+
+        int width = pkgi_text_width_ttf(line);
+        pkgi_draw_text_ttf((VITA_WIDTH - width) / 2, y, PKGI_FONT_Z,
+                           PKGI_COLOR_TEXT_ERROR, line);
+        y += line_height;
+
+        text += length;
+        if (*text == '\n')
+            text++;
+    }
 }
 
 static void reposition(void)

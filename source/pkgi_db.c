@@ -489,7 +489,7 @@ int pkgi_db_reload(char* error, uint32_t error_size)
     if (db_count == 0)
     {
         pkgi_snprintf(error, error_size,
-            _("No database loaded. Check config.txt URLs, dbformat.txt, and the network connection."));
+            _("No database loaded.\nCheck config.txt URLs, dbformat.txt, and the network connection."));
         return 0;
     }
     return 1;

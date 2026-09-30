@@ -90,7 +90,7 @@ static int ps3in_frame(const padData* d, uint32_t* buttons,
 
 void ps3in_init(void)
 {
-    ioPadInit(PS3IN_MAX_PORTS);
+    /* ya2d_init() already initializes libpad; do not initialize it twice. */
     memset(&in, 0, sizeof(in));
 }
 
