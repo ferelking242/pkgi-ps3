@@ -711,45 +711,48 @@ finish:
 
 int pkgi_install(const char *titleid)
 {
-	char source_pkg[256];
-	char install_dir[256];
-	char filename[256];
+    char source_pkg[256];
+    char install_dir[256];
+    char filename[256];
+    uint64_t fsize;
 
     pkgi_snprintf(source_pkg, sizeof(source_pkg), PKGI_INSTALL_FOLDER "/%s", root);
-	uint64_t fsize = pkgi_get_size(source_pkg);
-	if (fsize == 0)
-	{
-	    pkgi_dialog_error(_("Downloaded PKG was not found in the install folder."));
-	    return 0;
-	}
-
-	if (!pkgi_check_free_space(fsize))
-	{
-	    pkgi_dialog_error(_("Not enough free space to prepare the installation."));
-	    return 0;
-	}
-    
-	install_task_id = get_task_dir_id(PKGI_INSTALL_FOLDER, install_task_id);
-    pkgi_snprintf(install_dir, sizeof(install_dir), PKGI_INSTALL_FOLDER "/%d", install_task_id);
-
-	if (!pkgi_mkdirs(install_dir))
-	{
-		pkgi_dialog_error(_("Could not create install directory on HDD."));
-		return 0;
-	}
-
-	LOG("Creating .pdb files [%s]", titleid);
-
-	// write - ICON_FILE
-	pkgi_snprintf(filename, sizeof(filename), "%s/ICON_FILE", install_dir);
-	pkgi_snprintf(resume_file, sizeof(resume_file), "%s/%s.PNG", pkgi_get_temp_folder(), titleid);
-	if (!copy_file(resume_file, filename))
-	{
-	    LOG("Error copying %s", filename);
-	    return 0;
+    fsize = pkgi_get_size(source_pkg);
+    if (fsize == 0)
+    {
+        pkgi_dialog_error(_("Downloaded PKG was not found in the install folder."));
+        return 0;
     }
 
-    if (!create_install_pdb_files(pkg_path, fsize)) {
+    if (!pkgi_check_free_space(fsize))
+    {
+        pkgi_dialog_error(_("Not enough free space to prepare the installation."));
+        return 0;
+    }
+    
+    install_task_id = get_task_dir_id(PKGI_INSTALL_FOLDER, install_task_id);
+    pkgi_snprintf(install_dir, sizeof(install_dir), PKGI_INSTALL_FOLDER "/%d", install_task_id);
+
+    if (!pkgi_mkdirs(install_dir))
+    {
+        pkgi_dialog_error(_("Could not create install directory on HDD."));
+        return 0;
+    }
+
+    LOG("Creating .pdb files [%s]", titleid);
+
+    // write - ICON_FILE
+    pkgi_snprintf(filename, sizeof(filename), "%s/ICON_FILE", install_dir);
+    pkgi_snprintf(resume_file, sizeof(resume_file), "%s/%s.PNG",
+                  pkgi_get_temp_folder(), titleid);
+    if (!copy_file(resume_file, filename))
+    {
+        LOG("Error copying %s", filename);
+        return 0;
+    }
+
+    if (!create_install_pdb_files(install_dir, fsize))
+    {
         return 0;
     }
 
