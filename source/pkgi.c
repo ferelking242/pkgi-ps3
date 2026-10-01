@@ -110,10 +110,10 @@ static void pkgi_refresh_thread(void)
     pkgi_thread_exit();
 }
 
-static int install(const char* content, int batch_progress)
+static int install(const char* content, int show_dual_progress)
 {
     LOG("installing...");
-    if (batch_progress)
+    if (show_dual_progress)
     {
         pkgi_dialog_update_install_progress(_("Sending package to the PS3 installer"), -1.f);
         pkgi_dialog_allow_close(0);
@@ -137,7 +137,7 @@ static int install(const char* content, int batch_progress)
         return 0;
     }
 
-    if (batch_progress)
+    if (show_dual_progress)
         pkgi_dialog_update_install_progress(_("Install task queued"), 1.f);
 
     LOG("install succeeded");
@@ -153,7 +153,7 @@ static void pkgi_install_thread(void)
     {
         pkgi_sleep(250);
         pkgi_lock_process();
-        int ok = install(item->content, 0);
+        int ok = install(item->content, 1);
         pkgi_unlock_process();
 
         if (ok)
@@ -175,7 +175,11 @@ static void cb_dialog_install(int res)
     if (!pending_install_item)
         return;
 
-    pkgi_dialog_start_progress(_("Installing"), _("Preparing package..."), -1);
+    pkgi_dialog_start_dual_progress(_("Installing"), _("Download complete"), 1.f);
+    pkgi_dialog_update_progress(_("Download complete"), NULL, NULL, 1.f);
+    pkgi_dialog_update_progress_size(pending_install_item->size,
+                                    pending_install_item->size);
+    pkgi_dialog_update_install_progress(_("Preparing installer task"), -1.f);
     pkgi_dialog_allow_close(0);
     pkgi_start_thread("install_thread", &pkgi_install_thread);
 }

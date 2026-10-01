@@ -50,12 +50,17 @@ static uint32_t info_update;
 static uint32_t	queue_task_id 	= 10000002;
 static uint32_t	install_task_id = 80000002;
 
-static int copy_file(const char* source, const char* destination)
+static int copy_file(const char* source, const char* destination,
+                     int report_install_progress)
 {
     FILE* input = fopen(source, "rb");
     FILE* output;
     static unsigned char buffer[64 * 1024];
     size_t bytes_read;
+    uint64_t total_bytes = report_install_progress
+        ? (uint64_t)pkgi_get_size(source) : 0;
+    uint64_t copied_bytes = 0;
+    uint32_t last_progress_update = pkgi_time_msec();
     int failed = 0;
 
     if (!input)
@@ -74,6 +79,22 @@ static int copy_file(const char* source, const char* destination)
         {
             failed = 1;
             break;
+        }
+
+        if (report_install_progress)
+        {
+            copied_bytes += bytes_read;
+            uint32_t now = pkgi_time_msec();
+            if (copied_bytes >= total_bytes ||
+                (uint32_t)(now - last_progress_update) >= 250)
+            {
+                float progress = total_bytes
+                    ? (float)((double)copied_bytes / (double)total_bytes)
+                    : 0.f;
+                pkgi_dialog_update_install_progress(
+                    _("Copying PKG to the PS3 install queue"), progress);
+                last_progress_update = now;
+            }
         }
     }
 
@@ -745,7 +766,7 @@ int pkgi_install(const char *titleid)
     pkgi_snprintf(filename, sizeof(filename), "%s/ICON_FILE", install_dir);
     pkgi_snprintf(resume_file, sizeof(resume_file), "%s/%s.PNG",
                   pkgi_get_temp_folder(), titleid);
-    if (!copy_file(resume_file, filename))
+    if (!copy_file(resume_file, filename, 0))
     {
         LOG("Error copying %s", filename);
         return 0;
@@ -759,7 +780,7 @@ int pkgi_install(const char *titleid)
     pkgi_snprintf(filename, sizeof(filename), "%s/%s", install_dir, root);
     LOG("copy (%s) -> (%s), preserving the downloaded PKG", source_pkg, filename);
 
-    if (!copy_file(source_pkg, filename))
+    if (!copy_file(source_pkg, filename, 1))
     {
         pkgi_dialog_error(_("Could not copy the PKG into the PS3 install queue."));
         return 0;
