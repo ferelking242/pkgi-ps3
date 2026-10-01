@@ -63,6 +63,7 @@ typedef struct
 
 static sys_mutex_t g_dialog_lock;
 static uint32_t cpu_temp_c[2];
+static int g_netctl_initialized;
 
 static int g_ok_button;
 static int g_cancel_button;
@@ -631,6 +632,12 @@ void pkgi_start(void)
 
     LOG("initializing Network");
     sysModuleLoad(SYSMODULE_NET);
+    s32 netctl_result = netCtlInit();
+    if (netctl_result == 0)
+        g_netctl_initialized = 1;
+    else
+        LOG("netCtlInit failed (%x); network address display unavailable",
+            netctl_result);
     curl_global_init(CURL_GLOBAL_ALL);
 
     sys_mutex_attr_t mutex_attr;
@@ -733,6 +740,9 @@ void pkgi_swap(void)
 void pkgi_end(void)
 {
     if (module) end_music();
+
+    if (g_netctl_initialized)
+        netCtlTerm();
 
     curl_global_cleanup();
     pkgi_stop_debug_log();
@@ -1401,6 +1411,27 @@ int pkgi_validate_url(const char* url)
         return 1;
     }
     return 0;
+}
+
+int pkgi_get_ip_address(char* address, uint32_t size)
+{
+    union net_ctl_info info;
+
+    if (!address || size == 0)
+        return 0;
+
+    address[0] = 0;
+    memset(&info, 0, sizeof(info));
+    if (netCtlGetInfo(NET_CTL_INFO_IP_ADDRESS, &info) != 0)
+        return 0;
+
+    info.ip_address[sizeof(info.ip_address) - 1] = 0;
+    if (info.ip_address[0] == 0 ||
+        strcmp(info.ip_address, "0.0.0.0") == 0)
+        return 0;
+
+    pkgi_strncpy(address, size, info.ip_address);
+    return 1;
 }
 
 void pkgi_curl_init(CURL *curl)

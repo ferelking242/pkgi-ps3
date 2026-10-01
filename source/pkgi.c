@@ -120,7 +120,8 @@ static int install(const char* content, int show_dual_progress)
     }
     else
     {
-        pkgi_dialog_start_progress(_("Installing"), _("Preparing package..."), -1);
+        pkgi_dialog_start_progress(_("Sending to PS3 installer"),
+                                   _("Preparing installer task..."), -1);
         pkgi_dialog_allow_close(0);
     }
 
@@ -138,7 +139,7 @@ static int install(const char* content, int show_dual_progress)
     }
 
     if (show_dual_progress)
-        pkgi_dialog_update_install_progress(_("Install task queued"), 1.f);
+        pkgi_dialog_update_install_progress(_("Task queued in PS3 installer"), 1.f);
 
     LOG("install succeeded");
 
@@ -159,12 +160,13 @@ static void pkgi_install_thread(void)
         if (ok)
         {
             pkgi_dialog_message(item->name,
-                _("Queued for installation. PKG kept in /dev_hdd0/vsh/game_pkg."));
+                _("Sent to PS3 installer.\nCheck installation in the XMB.\nPKG remains in /dev_hdd0/vsh/game_pkg."));
         }
         item->presence = PresenceUnknown;
     }
 
     pending_install_item = NULL;
+    /* Stay in PKGi after queuing; the user chooses when to return to XMB. */
     state = StateMain;
     pkgi_thread_exit();
 }
@@ -175,7 +177,8 @@ static void cb_dialog_install(int res)
     if (!pending_install_item)
         return;
 
-    pkgi_dialog_start_dual_progress(_("Installing"), _("Download complete"), 1.f);
+    pkgi_dialog_start_dual_progress(_("Sending to PS3 installer"),
+                                    _("Download complete"), 1.f);
     pkgi_dialog_update_progress(_("Download complete"), NULL, NULL, 1.f);
     pkgi_dialog_update_progress_size(pending_install_item->size,
                                     pending_install_item->size);
@@ -605,7 +608,7 @@ static void pkgi_start_details_install(void)
 
 static void pkgi_do_main(pkgi_input* input)
 {
-    const uint32_t grid_columns = 4;
+    const uint32_t grid_columns = 3;
     const int grid_cell_height = 124;
     const int list_row_height = 34;
     const int grid_mode = config.grid_mode != 0;
@@ -617,7 +620,16 @@ static void pkgi_do_main(pkgi_input* input)
     int col_cover = PKGI_MAIN_HMARGIN;
     int col_region = col_cover + 46 + PKGI_MAIN_COLUMN_PADDING;
     int col_installed = col_region + pkgi_text_width("USA") + PKGI_MAIN_COLUMN_PADDING;
-    int col_name = col_installed + pkgi_text_width(PKGI_UTF8_INSTALLED) + PKGI_MAIN_COLUMN_PADDING;
+    int installed_label_width = pkgi_text_width(_("Installed"));
+    int incomplete_label_width = pkgi_text_width(_("Incomplete"));
+    int missing_label_width = pkgi_text_width(_("Not installed"));
+    if (incomplete_label_width > installed_label_width)
+        installed_label_width = incomplete_label_width;
+    if (missing_label_width > installed_label_width)
+        installed_label_width = missing_label_width;
+    int status_width = pkgi_text_width(PKGI_UTF8_CHECK_ON " ") +
+                       installed_label_width;
+    int col_name = col_installed + status_width + PKGI_MAIN_COLUMN_PADDING;
 
     uint32_t db_count = pkgi_db_count();
     
@@ -791,7 +803,8 @@ static void pkgi_do_main(pkgi_input* input)
         }
     }
     
-    int list_top = font_height * 3 / 2 + PKGI_MAIN_HLINE_EXTRA + PKGI_MAIN_VMARGIN;
+    int list_top = font_height * 2 + PKGI_MAIN_HLINE_EXTRA +
+                   PKGI_MAIN_VMARGIN + 4;
     if (grid_mode)
     {
         int grid_width = VITA_WIDTH - 2 * PKGI_MAIN_HMARGIN -
@@ -842,16 +855,35 @@ static void pkgi_do_main(pkgi_input* input)
             default: break;
             }
 
-            char meta[64];
             char size_str[32];
             pkgi_friendly_size(size_str, sizeof(size_str), item->size);
-            pkgi_snprintf(meta, sizeof(meta), "%s  %s  %s", region,
-                item->presence == PresenceInstalled ? PKGI_UTF8_INSTALLED :
-                item->presence == PresenceIncomplete ? PKGI_UTF8_PARTIAL : "",
-                size_str);
-            pkgi_clip_set(text_x, y + grid_cell_height - 31, text_width, 22);
-            pkgi_draw_text_z(text_x, y + grid_cell_height - 31,
-                             PKGI_FONT_Z, PKGI_COLOR_TEXT_DIM, meta);
+            const char* status_icon = item->presence == PresenceInstalled
+                ? PKGI_UTF8_CHECK_ON
+                : item->presence == PresenceIncomplete
+                    ? PKGI_UTF8_PARTIAL : PKGI_UTF8_CHECK_OFF;
+            const char* status_label = item->presence == PresenceInstalled
+                ? _("Installed")
+                : item->presence == PresenceIncomplete
+                    ? _("Incomplete") : _("Not installed");
+            uint32_t status_color = item->presence == PresenceInstalled
+                ? PKGI_COLOR_ACCENT
+                : item->presence == PresenceIncomplete
+                    ? PKGI_COLOR_BATTERY_LOW : PKGI_COLOR_TEXT_DIM;
+            char status[48];
+            pkgi_snprintf(status, sizeof(status), "%s %s",
+                          status_icon, status_label);
+            int status_y = y + grid_cell_height - 51;
+            pkgi_clip_set(text_x, status_y, text_width, 20);
+            pkgi_draw_text_z(text_x, status_y, PKGI_FONT_Z,
+                             status_color, status);
+            pkgi_clip_remove();
+
+            int size_y = status_y + 19;
+            char meta[64];
+            pkgi_snprintf(meta, sizeof(meta), "%s  %s", region, size_str);
+            pkgi_clip_set(text_x, size_y, text_width, 20);
+            pkgi_draw_text_z(text_x, size_y, PKGI_FONT_Z,
+                             PKGI_COLOR_TEXT_DIM, meta);
             pkgi_clip_remove();
         }
     }
@@ -893,10 +925,22 @@ static void pkgi_do_main(pkgi_input* input)
             }
 
             pkgi_draw_text(col_region, text_y, color, region);
-            if (item->presence == PresenceIncomplete)
-                pkgi_draw_text(col_installed, text_y, color, PKGI_UTF8_PARTIAL);
-            else if (item->presence == PresenceInstalled)
-                pkgi_draw_text(col_installed, text_y, color, PKGI_UTF8_INSTALLED);
+            const char* status_icon = item->presence == PresenceInstalled
+                ? PKGI_UTF8_CHECK_ON
+                : item->presence == PresenceIncomplete
+                    ? PKGI_UTF8_PARTIAL : PKGI_UTF8_CHECK_OFF;
+            const char* status_label = item->presence == PresenceInstalled
+                ? _("Installed")
+                : item->presence == PresenceIncomplete
+                    ? _("Incomplete") : _("Not installed");
+            uint32_t status_color = item->presence == PresenceInstalled
+                ? PKGI_COLOR_ACCENT
+                : item->presence == PresenceIncomplete
+                    ? PKGI_COLOR_BATTERY_LOW : PKGI_COLOR_TEXT_DIM;
+            char status[48];
+            pkgi_snprintf(status, sizeof(status), "%s %s",
+                          status_icon, status_label);
+            pkgi_draw_text(col_installed, text_y, status_color, status);
 
             pkgi_draw_text(VITA_WIDTH - (PKGI_MAIN_SCROLL_WIDTH +
                 PKGI_MAIN_SCROLL_PADDING + PKGI_MAIN_HMARGIN + sizew),
@@ -1020,6 +1064,35 @@ static void pkgi_do_head(void)
     uint32_t color = pkgi_temperature_is_high() ? PKGI_COLOR_BATTERY_LOW : PKGI_COLOR_BATTERY_CHARGING;
     int rightw = pkgi_text_width(battery);
     pkgi_draw_text(VITA_WIDTH - PKGI_MAIN_HLINE_EXTRA - (rightw + PKGI_MAIN_HMARGIN), PKGI_MAIN_VMARGIN, color, battery);
+
+    static char network_text[96];
+    static uint32_t network_text_color = PKGI_COLOR_TEXT_DIM;
+    static uint32_t next_network_check;
+    uint32_t now = pkgi_time_msec();
+    if (next_network_check == 0 || now >= next_network_check)
+    {
+        char ip_address[32];
+        if (pkgi_get_ip_address(ip_address, sizeof(ip_address)))
+        {
+            pkgi_snprintf(network_text, sizeof(network_text),
+                          "WebMAN: http://%s/setup.ps3", ip_address);
+            network_text_color = PKGI_COLOR_ACCENT;
+        }
+        else
+        {
+            pkgi_snprintf(network_text, sizeof(network_text), "%s",
+                          _("Network IP unavailable"));
+            network_text_color = PKGI_COLOR_TEXT_DIM;
+        }
+        next_network_check = now + 1000;
+    }
+    int network_y = font_height + PKGI_MAIN_VMARGIN +
+                    PKGI_MAIN_HLINE_EXTRA + 4;
+    pkgi_clip_set(PKGI_MAIN_HMARGIN, network_y,
+                  VITA_WIDTH - 2 * PKGI_MAIN_HMARGIN, font_height + 2);
+    pkgi_draw_text(PKGI_MAIN_HMARGIN, network_y, network_text_color,
+                   network_text);
+    pkgi_clip_remove();
 
     float download_progress = 0.f;
     if (pkgi_dialog_background_progress(&download_progress))
@@ -1261,7 +1334,8 @@ int main(int argc, const char* argv[])
     pkgi_dialog_init();
     
     font_height = pkgi_text_height("M");
-    avail_height = VITA_HEIGHT - 2 * (font_height + PKGI_MAIN_HLINE_EXTRA*2 + PKGI_MAIN_VMARGIN);
+    avail_height = VITA_HEIGHT - 2 * (font_height + PKGI_MAIN_HLINE_EXTRA*2 + PKGI_MAIN_VMARGIN)
+                   - font_height / 2 - 4;
     bottom_y = VITA_HEIGHT - (PKGI_MAIN_VMARGIN + font_height);
 
     state = StateRefreshing;

@@ -68,6 +68,7 @@ void pkgi_end(void);
 
 int pkgi_temperature_is_high(void);
 int pkgi_get_temperature(uint8_t cpu);
+int pkgi_get_ip_address(char* address, uint32_t size);
 
 uint64_t pkgi_get_free_space(void);
 const char* pkgi_get_config_folder(void);
