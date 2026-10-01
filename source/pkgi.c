@@ -1294,7 +1294,7 @@ static void pkgi_update_check_thread(void)
 	LOG("download URL is %s", value);
 
     DbItem update_item = {
-        .content = "UP0001-NP00PKGI3_00-0000000000000000",
+        .content = "UP0001-NP00PKGR1_00-0000000000000000",
         .name    = "PKGi PS3 Update",
         .url     = value,
     };

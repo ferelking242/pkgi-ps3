@@ -9,3 +9,4 @@ order asc
 filter ASA,EUR,JPN,USA
 dl_mode_background 1
 no_music 1
+no_version_check 1

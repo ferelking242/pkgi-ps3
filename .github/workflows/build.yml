@@ -45,6 +45,14 @@ jobs:
       run: |
         make install
 
+    - name: Verify fork identity and startup guard removal
+      run: |
+        if grep -R -n -E 'pkgi_security_check|ERROR: Integrity check failed!' source include; then
+          echo "The upstream startup integrity guard must not be present in this fork." >&2
+          exit 1
+        fi
+        grep -q 'NP00PKGR1' sfo.xml
+
     - name: Build PKGi App Package
       run: |
         make pkg

@@ -35,7 +35,7 @@ See the [latest changes here](https://github.com/bucanero/pkgi-ps3/blob/master/C
 
 # Setup instructions
 
-You need to create a [`pkgi.txt`](#sample-db-file) file in `/dev_hdd0/game/NP00PKGI3/USRDIR` that contains the items available for installation.
+You need to create a [`pkgi.txt`](#sample-db-file) file in `/dev_hdd0/game/NP00PKGR1/USRDIR` that contains the items available for installation.
 The text database format is user customizable. Check [this section](#user-defined-db-format) to learn how to define your own custom DB format.
 
 ## Multiple databases
@@ -56,7 +56,7 @@ Items on each of these files will be auto-categorized to the file content type. 
 
 ## Online DB update
 
-You can refresh and sync an online database by adding the DB URL(s) to the `config.txt` file in `/dev_hdd0/game/NP00PKGI3/USRDIR`. 
+You can refresh and sync an online database by adding the DB URL(s) to the `config.txt` file in `/dev_hdd0/game/NP00PKGR1/USRDIR`.
 
 For example:
 
@@ -125,7 +125,7 @@ EP0001-UPDWEBMOD_00-0000000000000000,9,webMAN MOD v1.47.36,Backup Manager,,http:
 
 ## User-defined DB format
 
-To use a custom database format, you need to create a `dbformat.txt` file, and save it on `/dev_hdd0/game/NP00PKGI3/USRDIR`.
+To use a custom database format, you need to create a `dbformat.txt` file, and save it on `/dev_hdd0/game/NP00PKGR1/USRDIR`.
 
 The `dbformat.txt` definition file is a 2-line text file:
 * Line 1: the custom delimiter character (e.g.: `;`, `,`, `|`, etc.)

@@ -8,6 +8,12 @@ produit et une couche manette corrigée.
 
 ## Nouveautés de ce fork
 
+### Installation séparée
+Cette build utilise l'identifiant PS3 `NP00PKGR1` et apparaît sous le nom
+**PKGi Remastered Fork**. Elle s'installe à côté de l'application officielle :
+elle ne supprime pas l'ancienne application, mais ses réglages et bases locales
+sont séparés dans `/dev_hdd0/game/NP00PKGR1/USRDIR`.
+
 ### 🎮 Couche manette refondue
 La couche manette (`source/ps3_input.c`) lit maintenant les champs normalisés par libpad
 et utilise les masques attendus par l'interface :

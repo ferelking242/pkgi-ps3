@@ -26,7 +26,7 @@
 
 #define PKGI_UNUSED(x) (void)(x)
 
-#define PKGI_APP_FOLDER "/dev_hdd0/game/NP00PKGI3/USRDIR"
+#define PKGI_APP_FOLDER "/dev_hdd0/game/NP00PKGR1/USRDIR"
 #define PKGI_RAP_FOLDER "/dev_hdd0/exdata"
 #define PKGI_TMP_FOLDER "/dev_hdd0/tmp/pkgi"
 #define PKGI_QUEUE_FOLDER "/dev_hdd0/vsh/task"

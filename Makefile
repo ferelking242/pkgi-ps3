@@ -10,8 +10,8 @@ endif
 #---------------------------------------------------------------------------------
 #  TITLE, APPID, CONTENTID, ICON0 SFOXML before ppu_rules.
 #---------------------------------------------------------------------------------
-TITLE		:=	PKGi PS3
-APPID		:=	NP00PKGI3
+TITLE		:=	PKGi Remastered Fork
+APPID		:=	NP00PKGR1
 CONTENTID	:=	UP0001-$(APPID)_00-0000000000000000
 ICON0		:=	pkgfiles/ICON0.PNG
 SFOXML		:=	sfo.xml
