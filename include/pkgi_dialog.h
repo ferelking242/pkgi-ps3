@@ -30,9 +30,12 @@ void pkgi_dialog_details(DbItem* item, const char* type);
 void pkgi_dialog_ok_cancel(const char* title, const char* text, pkgi_dialog_callback_t callback);
 
 void pkgi_dialog_start_progress(const char* title, const char* text, float progress);
+void pkgi_dialog_start_dual_progress(const char* title, const char* text,
+                                    float download_progress);
 void pkgi_dialog_set_progress_title(const char* title);
 void pkgi_dialog_update_progress(const char* text, const char* extra, const char* eta, float progress);
 void pkgi_dialog_update_progress_size(uint64_t downloaded, uint64_t total);
+void pkgi_dialog_update_install_progress(const char* text, float progress);
 
 void pkgi_dialog_close(void);
 

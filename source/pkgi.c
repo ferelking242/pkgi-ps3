@@ -26,6 +26,8 @@ static State state;
 
 static uint32_t first_item;
 static uint32_t selected_item;
+static int selection_mode;
+static DbItem* pending_install_item;
 
 static int search_active;
 
@@ -56,6 +58,7 @@ static char cover_request_content[64];
 static volatile int cover_worker_active;
 
 static void reposition(void);
+static void cb_dialog_install(int res);
 
 static const char* pkgi_get_ok_str(void)
 {
@@ -107,16 +110,24 @@ static void pkgi_refresh_thread(void)
     pkgi_thread_exit();
 }
 
-static int install(const char* content)
+static int install(const char* content, int batch_progress)
 {
     LOG("installing...");
-    pkgi_dialog_start_progress(_("Installing"), _("Please wait..."), -1);
+    if (batch_progress)
+    {
+        pkgi_dialog_update_install_progress(_("Sending package to the PS3 installer"), -1.f);
+        pkgi_dialog_allow_close(0);
+    }
+    else
+    {
+        pkgi_dialog_start_progress(_("Installing"), _("Preparing package..."), -1);
+        pkgi_dialog_allow_close(0);
+    }
 
     char titleid[10];
     pkgi_memcpy(titleid, content + 7, 9);
     titleid[9] = 0;
 
-    pkgi_dialog_allow_close(0);
     int ok = pkgi_install(titleid);
     pkgi_dialog_allow_close(1);
 
@@ -126,9 +137,47 @@ static int install(const char* content)
         return 0;
     }
 
+    if (batch_progress)
+        pkgi_dialog_update_install_progress(_("Install task queued"), 1.f);
+
     LOG("install succeeded");
 
     return 1;
+}
+
+static void pkgi_install_thread(void)
+{
+    DbItem* item = pending_install_item;
+
+    if (item)
+    {
+        pkgi_sleep(250);
+        pkgi_lock_process();
+        int ok = install(item->content, 0);
+        pkgi_unlock_process();
+
+        if (ok)
+        {
+            pkgi_dialog_message(item->name,
+                _("Queued for installation. PKG kept in /dev_hdd0/vsh/game_pkg."));
+        }
+        item->presence = PresenceUnknown;
+    }
+
+    pending_install_item = NULL;
+    state = StateMain;
+    pkgi_thread_exit();
+}
+
+static void cb_dialog_install(int res)
+{
+    PKGI_UNUSED(res);
+    if (!pending_install_item)
+        return;
+
+    pkgi_dialog_start_progress(_("Installing"), _("Preparing package..."), -1);
+    pkgi_dialog_allow_close(0);
+    pkgi_start_thread("install_thread", &pkgi_install_thread);
 }
 
 static void pkgi_download_thread(void)
@@ -145,8 +194,12 @@ static void pkgi_download_thread(void)
     {
         if (!config.dl_mode_background)
         {
-            install(item->content);
-            pkgi_dialog_message(item->name, _("Successfully downloaded"));
+            char prompt[192];
+            pending_install_item = item;
+            pkgi_snprintf(prompt, sizeof(prompt),
+                _("Download complete. %s: install  %s: exit (PKG stays in /dev_hdd0/vsh/game_pkg)."),
+                pkgi_get_ok_str(), pkgi_get_cancel_str());
+            pkgi_dialog_ok_cancel(item->name, prompt, &cb_dialog_install);
         }
         else
         {
@@ -169,7 +222,7 @@ static void pkgi_download_thread(void)
 
 /* ---- Batch download (PKGi Remastered) ----
  * Downloads every marked item in sequence. In direct mode each
- * finished download is installed right away (download + auto install);
+ * finished download is sent to the PS3 installer right away;
  * in background mode the PKG is queued as an install task.
  * One failed item does not stop the queue; a summary is shown. */
 static void pkgi_batch_thread(void)
@@ -194,18 +247,28 @@ static void pkgi_batch_thread(void)
         char title[192];
         pkgi_snprintf(title, sizeof(title), _("Batch %u/%u"), done + failed + 1, total);
 
-        pkgi_dialog_start_progress(title, item->name, 0);
-        pkgi_dialog_allow_close(0);
+        pkgi_dialog_start_dual_progress(title, item->name, 0);
+        pkgi_dialog_allow_close(1);
 
         if (pkgi_check_free_space(item->size))
         {
             item->presence = PresenceMissing;
             if (pkgi_download(item, config.dl_mode_background))
             {
-                done++;
                 if (!config.dl_mode_background)
                 {
-                    install(item->content);
+                    if (install(item->content, 1))
+                    {
+                        done++;
+                        pkgi_sleep(700);
+                    }
+                    else
+                        failed++;
+                }
+                else
+                {
+                    pkgi_dialog_update_install_progress(_("Background download queued"), 1.f);
+                    done++;
                 }
             }
             else if (!pkgi_dialog_is_cancelled())
@@ -230,7 +293,7 @@ static void pkgi_batch_thread(void)
     pkgi_db_clear_selection();
 
     char summary[192];
-    pkgi_snprintf(summary, sizeof(summary), _("%u downloaded, %u failed"), done, failed);
+    pkgi_snprintf(summary, sizeof(summary), _("%u queued for install, %u failed"), done, failed);
     pkgi_dialog_message(_("Batch download"), summary);
 
     state = StateMain;
@@ -239,6 +302,7 @@ static void pkgi_batch_thread(void)
 
 static void pkgi_start_batch(void)
 {
+    selection_mode = 0;
     state = StateMain;
     pkgi_start_thread("batch_thread", &pkgi_batch_thread);
 }
@@ -574,26 +638,10 @@ static void pkgi_do_main(pkgi_input* input)
             pkgi_dialog_ok_cancel("\xE2\x98\x85  PKGi PS3 v" PKGI_VERSION "  \xE2\x98\x85", _("Exit to XMB?"), &cb_dialog_exit);
         }
 
-        if (input->active & PKGI_BUTTON_SELECT)
+        if (input->pressed & PKGI_BUTTON_SELECT)
         {
             input->pressed &= ~PKGI_BUTTON_SELECT;
-
-            /* PKGi Remastered: SELECT toggles selection mode. In
-             * selection mode SELECT marks/unmarks the highlighted
-             * item; hold SELECT and press START to launch the batch. */
-            static int select_mode;
-            if (select_mode)
-            {
-                select_mode = 0;
-                pkgi_db_clear_selection();
-                pkgi_dialog_message(_("Selection"), _("Selection cleared"));
-            }
-            else
-            {
-                select_mode = 1;
-                pkgi_db_toggle_select(selected_item);
-                pkgi_dialog_message(_("Selection"), _("Mark items with SELECT, download with START"));
-            }
+            selection_mode = !selection_mode;
         }
 
         if (input->active & PKGI_BUTTON_START)
@@ -880,7 +928,12 @@ static void pkgi_do_main(pkgi_input* input)
         }
     }
 
-    if (input && (input->pressed & pkgi_ok_button()) && db_count)
+    if (input && selection_mode && (input->pressed & pkgi_ok_button()) && db_count)
+    {
+        input->pressed &= ~pkgi_ok_button();
+        pkgi_db_toggle_select(selected_item);
+    }
+    else if (input && (input->pressed & pkgi_ok_button()) && db_count)
     {
         input->pressed &= ~pkgi_ok_button();
 
@@ -1027,7 +1080,13 @@ static void pkgi_do_tail(void)
     else
     {
         uint32_t marked = pkgi_db_selected_count();
-        if (marked > 0)
+        if (selection_mode)
+        {
+            pkgi_snprintf(text, sizeof(text),
+                _("%u selected  %s: mark/unmark  START: download  SELECT: done"),
+                marked, pkgi_get_ok_str());
+        }
+        else if (marked > 0)
         {
             char sel[64];
             pkgi_snprintf(sel, sizeof(sel), _("%u selected"), marked);
@@ -1165,7 +1224,7 @@ static void pkgi_update_check_thread(void)
 
     pkgi_dialog_start_progress(update_item.name, _("Preparing..."), 0);
     
-    if (pkgi_download(&update_item, 0) && install(update_item.content))
+    if (pkgi_download(&update_item, 0) && install(update_item.content, 0))
     {
         pkgi_dialog_message(update_item.name, _("Successfully downloaded PKGi PS3 update"));
         LOG("update downloaded!");

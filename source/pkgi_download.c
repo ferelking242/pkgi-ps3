@@ -50,6 +50,46 @@ static uint32_t info_update;
 static uint32_t	queue_task_id 	= 10000002;
 static uint32_t	install_task_id = 80000002;
 
+static int copy_file(const char* source, const char* destination)
+{
+    FILE* input = fopen(source, "rb");
+    FILE* output;
+    static unsigned char buffer[64 * 1024];
+    size_t bytes_read;
+    int failed = 0;
+
+    if (!input)
+        return 0;
+
+    output = fopen(destination, "wb");
+    if (!output)
+    {
+        fclose(input);
+        return 0;
+    }
+
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), input)) > 0)
+    {
+        if (fwrite(buffer, 1, bytes_read, output) != bytes_read)
+        {
+            failed = 1;
+            break;
+        }
+    }
+
+    if (ferror(input))
+        failed = 1;
+    if (fclose(input) != 0)
+        failed = 1;
+    if (fclose(output) != 0)
+        failed = 1;
+
+    if (failed)
+        remove(destination);
+
+    return !failed;
+}
+
 
 static uint32_t get_task_dir_id(const char* dir, uint32_t tid)
 {
@@ -479,7 +519,7 @@ static int download_pkg_file(void)
     int result = 0;
 
     pkgi_strncpy(item_name, sizeof(item_name), root);
-    pkgi_snprintf(item_path, sizeof(item_path), "%s/%s", pkgi_get_temp_folder(), root);
+    pkgi_snprintf(item_path, sizeof(item_path), PKGI_INSTALL_FOLDER "/%s", root);
     LOG("downloading %s", item_name);
 
     if (download_resume)
@@ -496,6 +536,8 @@ static int download_pkg_file(void)
     if (!download_data()) goto bail;
 
     LOG("%s downloaded", item_path);
+    pkgi_dialog_update_progress(_("Download complete"), NULL, NULL, 1.f);
+    pkgi_dialog_update_progress_size(total_size, total_size);
     result = 1;
 
 bail:
@@ -669,16 +711,28 @@ finish:
 
 int pkgi_install(const char *titleid)
 {
-	char pkg_path[256];
+	char source_pkg[256];
+	char install_dir[256];
 	char filename[256];
 
-    pkgi_snprintf(pkg_path, sizeof(pkg_path), "%s/%s", pkgi_get_temp_folder(), root);
-	uint64_t fsize = pkgi_get_size(pkg_path);
+    pkgi_snprintf(source_pkg, sizeof(source_pkg), PKGI_INSTALL_FOLDER "/%s", root);
+	uint64_t fsize = pkgi_get_size(source_pkg);
+	if (fsize == 0)
+	{
+	    pkgi_dialog_error(_("Downloaded PKG was not found in the install folder."));
+	    return 0;
+	}
+
+	if (!pkgi_check_free_space(fsize))
+	{
+	    pkgi_dialog_error(_("Not enough free space to prepare the installation."));
+	    return 0;
+	}
     
 	install_task_id = get_task_dir_id(PKGI_INSTALL_FOLDER, install_task_id);
-    pkgi_snprintf(pkg_path, sizeof(pkg_path), PKGI_INSTALL_FOLDER "/%d", install_task_id);
+    pkgi_snprintf(install_dir, sizeof(install_dir), PKGI_INSTALL_FOLDER "/%d", install_task_id);
 
-	if (!pkgi_mkdirs(pkg_path))
+	if (!pkgi_mkdirs(install_dir))
 	{
 		pkgi_dialog_error(_("Could not create install directory on HDD."));
 		return 0;
@@ -687,11 +741,11 @@ int pkgi_install(const char *titleid)
 	LOG("Creating .pdb files [%s]", titleid);
 
 	// write - ICON_FILE
-	pkgi_snprintf(filename, sizeof(filename), "%s/ICON_FILE", pkg_path);
+	pkgi_snprintf(filename, sizeof(filename), "%s/ICON_FILE", install_dir);
 	pkgi_snprintf(resume_file, sizeof(resume_file), "%s/%s.PNG", pkgi_get_temp_folder(), titleid);
-	if (rename(resume_file, filename) != 0)
+	if (!copy_file(resume_file, filename))
 	{
-	    LOG("Error saving %s", filename);
+	    LOG("Error copying %s", filename);
 	    return 0;
     }
 
@@ -699,12 +753,16 @@ int pkgi_install(const char *titleid)
         return 0;
     }
 
-    pkgi_snprintf(filename, sizeof(filename), "%s/%s", pkg_path, root);
-    pkgi_snprintf(pkg_path, sizeof(pkg_path), "%s/%s", pkgi_get_temp_folder(), root);
-    
-    LOG("move (%s) -> (%s)", pkg_path, filename);
-    
-	return (rename(pkg_path, filename) == 0);
+    pkgi_snprintf(filename, sizeof(filename), "%s/%s", install_dir, root);
+    LOG("copy (%s) -> (%s), preserving the downloaded PKG", source_pkg, filename);
+
+    if (!copy_file(source_pkg, filename))
+    {
+        pkgi_dialog_error(_("Could not copy the PKG into the PS3 install queue."));
+        return 0;
+    }
+
+	return 1;
 }
 
 int pkgi_download_icon(const char* content)

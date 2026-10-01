@@ -21,10 +21,13 @@ static char dialog_text[256];
 static char dialog_extra[256];
 static char dialog_eta[256];
 static char dialog_size[96];
+static char dialog_install_text[128];
 static float dialog_progress;
+static float dialog_install_progress;
 static int dialog_allow_close;
 static int dialog_cancelled;
 static int dialog_background;
+static int dialog_dual_progress;
 static int details_install_requested;
 static pkgi_texture pkg_icon = NULL;
 static float pkg_icon_scale = 0.5f;
@@ -63,6 +66,9 @@ void pkgi_dialog_init(void)
     dialog_allow_close = 1;
     dialog_background = 0;
     details_install_requested = 0;
+    dialog_dual_progress = 0;
+    dialog_install_progress = 0.f;
+    dialog_install_text[0] = 0;
 }
 
 int pkgi_dialog_is_open(void)
@@ -126,10 +132,14 @@ void pkgi_dialog_data_init(DialogType type, const char* title, const char* text)
     dialog_extra[0] = 0;
     dialog_eta[0] = 0;
     dialog_size[0] = 0;
+    dialog_install_text[0] = 0;
 
     dialog_cancelled = 0;
     dialog_background = 0;
     details_install_requested = 0;
+    dialog_dual_progress = 0;
+    dialog_install_progress = 0.f;
+    dialog_callback = NULL;
     dialog_type = type;
     dialog_delta = 1;
 }
@@ -225,6 +235,27 @@ void pkgi_dialog_start_progress(const char* title, const char* text, float progr
     pkgi_dialog_lock();
     pkgi_dialog_data_init(DialogProgress, title, text);
     dialog_progress = progress;
+    pkgi_dialog_unlock();
+}
+
+void pkgi_dialog_start_dual_progress(const char* title, const char* text,
+                                     float download_progress)
+{
+    pkgi_dialog_start_progress(title, text, download_progress);
+    pkgi_dialog_lock();
+    dialog_dual_progress = 1;
+    dialog_install_progress = 0.f;
+    pkgi_strncpy(dialog_install_text, sizeof(dialog_install_text),
+                 _("Waiting for download"));
+    pkgi_dialog_unlock();
+}
+
+void pkgi_dialog_update_install_progress(const char* text, float progress)
+{
+    pkgi_dialog_lock();
+    dialog_dual_progress = 1;
+    pkgi_strncpy(dialog_install_text, sizeof(dialog_install_text), text ? text : "");
+    dialog_install_progress = progress > 1.f ? 1.f : progress;
     pkgi_dialog_unlock();
 }
 
@@ -328,9 +359,14 @@ void pkgi_do_dialog(pkgi_input* input)
         {
             dialog_delta = -1;
         }
-        else if ((dialog_type == DialogProgress || dialog_type == DialogOkCancel) && (input->pressed & pkgi_cancel_button()))
+        else if (dialog_type == DialogProgress && (input->pressed & pkgi_cancel_button()))
         {
             dialog_cancelled = 1;
+        }
+        else if (dialog_type == DialogOkCancel && (input->pressed & pkgi_cancel_button()))
+        {
+            dialog_delta = -1;
+            dialog_callback = NULL;
         }
         else if (dialog_type == DialogProgress && (input->pressed & PKGI_BUTTON_LT))
         {
@@ -375,6 +411,8 @@ void pkgi_do_dialog(pkgi_input* input)
             dialog_extra[0] = 0;
             dialog_eta[0] = 0;
             dialog_size[0] = 0;
+            dialog_install_text[0] = 0;
+            dialog_dual_progress = 0;
             dialog_background = 0;
 
             dialog_width = 0;
@@ -430,9 +468,13 @@ void pkgi_do_dialog(pkgi_input* input)
     char local_extra[256];
     char local_eta[256];
     char local_size[96];
+    char local_install_text[128];
     float local_progress = dialog_progress;
+    float local_install_progress = dialog_install_progress;
     int local_allow_close = dialog_allow_close;
     int local_background = dialog_background;
+    int local_dual_progress = dialog_dual_progress;
+    int32_t local_install_y;
     int32_t local_width = dialog_width;
     int32_t local_height = dialog_height;
 
@@ -441,6 +483,7 @@ void pkgi_do_dialog(pkgi_input* input)
     pkgi_strncpy(local_extra, sizeof(local_extra), dialog_extra);
     pkgi_strncpy(local_eta, sizeof(local_eta), dialog_eta);
     pkgi_strncpy(local_size, sizeof(local_size), dialog_size);
+    pkgi_strncpy(local_install_text, sizeof(local_install_text), dialog_install_text);
 
     pkgi_dialog_unlock();
 
@@ -501,50 +544,125 @@ void pkgi_do_dialog(pkgi_input* input)
     {
         int extraw = pkgi_text_width(local_extra);
 
-        int availw = VITA_WIDTH - 2 * (PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING) - (extraw ? extraw + 10 : 10);
-        pkgi_clip_set(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2 - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING, availw, font_height + 2);
-        pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2 - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_text);
-        pkgi_clip_remove();
-
-        if (local_extra[0])
+        if (local_dual_progress)
         {
-            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w - (PKGI_DIALOG_PADDING + extraw), VITA_HEIGHT / 2 - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_extra);
-        }
+            int bar_x = PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING;
+            int bar_width = w - 2 * PKGI_DIALOG_PADDING;
+            int download_y = VITA_HEIGHT / 2 - 20;
+            int install_y = VITA_HEIGHT / 2 + 44;
+            int title_y = download_y - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING;
+            int text_width = bar_width - (extraw ? extraw + 10 : 0);
+            char download_meta[128];
+            char percent[24];
 
-        if (local_progress < 0)
-        {
-            uint32_t avail = w - 2 * PKGI_DIALOG_PADDING;
+            pkgi_clip_set(bar_x, title_y, text_width, font_height + 2);
+            pkgi_draw_text_z(bar_x, title_y, PKGI_DIALOG_TEXT_Z,
+                             PKGI_COLOR_TEXT_DIALOG, local_text);
+            pkgi_clip_remove();
+            if (local_extra[0])
+                pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w -
+                                 (PKGI_DIALOG_PADDING + extraw),
+                                 title_y, PKGI_DIALOG_TEXT_Z,
+                                 PKGI_COLOR_TEXT_DIALOG, local_extra);
 
-            uint32_t start = (pkgi_time_msec() / 2) % (avail + PKGI_DIALOG_PROCESS_BAR_CHUNK);
-            uint32_t end = start < PKGI_DIALOG_PROCESS_BAR_CHUNK ? start : start + PKGI_DIALOG_PROCESS_BAR_CHUNK > avail + PKGI_DIALOG_PROCESS_BAR_CHUNK ? avail : start;
-            start = start < PKGI_DIALOG_PROCESS_BAR_CHUNK ? 0 : start - PKGI_DIALOG_PROCESS_BAR_CHUNK;
+            pkgi_draw_fill_rect_z(bar_x, download_y, PKGI_MENU_Z, bar_width,
+                                  PKGI_DIALOG_PROCESS_BAR_HEIGHT,
+                                  PKGI_COLOR_PROGRESS_BACKGROUND);
+            pkgi_draw_fill_rect_z(bar_x, download_y, PKGI_MENU_Z,
+                                  (int)(bar_width * local_progress),
+                                  PKGI_DIALOG_PROCESS_BAR_HEIGHT,
+                                  PKGI_COLOR_PROGRESS_BAR);
 
-            pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2, PKGI_MENU_Z, avail, PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BACKGROUND);
-            pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING + start, VITA_HEIGHT / 2, PKGI_MENU_Z, end - start, PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BAR);
+            pkgi_snprintf(percent, sizeof(percent), "%.0f%%",
+                          local_progress * 100.f);
+            pkgi_snprintf(download_meta, sizeof(download_meta), "%s  %s",
+                          local_size, percent);
+            if (local_eta[0])
+                pkgi_draw_text_z(bar_x,
+                                 download_y + PKGI_DIALOG_PROCESS_BAR_HEIGHT + 3,
+                                 PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIM, local_eta);
+            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w -
+                             (PKGI_DIALOG_PADDING + pkgi_text_width(download_meta)),
+                             download_y + PKGI_DIALOG_PROCESS_BAR_HEIGHT + 3,
+                             PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG,
+                             download_meta);
+
+            local_install_y = install_y - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING;
+            pkgi_clip_set(bar_x, local_install_y, bar_width, font_height + 2);
+            pkgi_draw_text_z(bar_x, local_install_y, PKGI_DIALOG_TEXT_Z,
+                             PKGI_COLOR_TEXT_DIALOG, local_install_text);
+            pkgi_clip_remove();
+
+            pkgi_draw_fill_rect_z(bar_x, install_y, PKGI_MENU_Z, bar_width,
+                                  PKGI_DIALOG_PROCESS_BAR_HEIGHT,
+                                  PKGI_COLOR_PROGRESS_BACKGROUND);
+            if (local_install_progress < 0.f)
+            {
+                int chunk = bar_width / 4;
+                int start = (pkgi_time_msec() / 2) % (bar_width + chunk);
+                int draw_start = start > chunk ? start - chunk : 0;
+                int draw_end = start > bar_width ? bar_width : start;
+                if (draw_end > draw_start)
+                    pkgi_draw_fill_rect_z(bar_x + draw_start, install_y,
+                                          PKGI_MENU_Z, draw_end - draw_start,
+                                          PKGI_DIALOG_PROCESS_BAR_HEIGHT,
+                                          PKGI_COLOR_PROGRESS_BAR);
+            }
+            else
+            {
+                pkgi_draw_fill_rect_z(bar_x, install_y, PKGI_MENU_Z,
+                                      (int)(bar_width * local_install_progress),
+                                      PKGI_DIALOG_PROCESS_BAR_HEIGHT,
+                                      PKGI_COLOR_PROGRESS_BAR);
+            }
         }
         else
         {
-            pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2, PKGI_MENU_Z, w - 2 * PKGI_DIALOG_PADDING, PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BACKGROUND);
-            pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2, PKGI_MENU_Z, (int)((w - 2 * PKGI_DIALOG_PADDING) * local_progress), PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BAR);
+            int availw = VITA_WIDTH - 2 * (PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING) - (extraw ? extraw + 10 : 10);
+            pkgi_clip_set(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2 - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING, availw, font_height + 2);
+            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2 - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_text);
+            pkgi_clip_remove();
 
-            char percent[256];
-            pkgi_snprintf(percent, sizeof(percent), "%.0f%%", local_progress * 100.f);
+            if (local_extra[0])
+            {
+                pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w - (PKGI_DIALOG_PADDING + extraw), VITA_HEIGHT / 2 - font_height - PKGI_DIALOG_PROCESS_BAR_PADDING, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_extra);
+            }
 
-            int percentw = pkgi_text_width(percent);
-            pkgi_draw_text_z((VITA_WIDTH - percentw) / 2, VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, percent);
-        }
+            if (local_progress < 0)
+            {
+                uint32_t avail = w - 2 * PKGI_DIALOG_PADDING;
 
-        if (local_eta[0])
-        {
-            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING,
-                             VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING,
-                             PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIM, local_eta);
-        }
-        if (local_size[0])
-        {
-            pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w - (PKGI_DIALOG_PADDING + pkgi_text_width(local_size)),
-                             VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING,
-                             PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_size);
+                uint32_t start = (pkgi_time_msec() / 2) % (avail + PKGI_DIALOG_PROCESS_BAR_CHUNK);
+                uint32_t end = start < PKGI_DIALOG_PROCESS_BAR_CHUNK ? start : start + PKGI_DIALOG_PROCESS_BAR_CHUNK > avail + PKGI_DIALOG_PROCESS_BAR_CHUNK ? avail : start;
+                start = start < PKGI_DIALOG_PROCESS_BAR_CHUNK ? 0 : start - PKGI_DIALOG_PROCESS_BAR_CHUNK;
+
+                pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2, PKGI_MENU_Z, avail, PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BACKGROUND);
+                pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING + start, VITA_HEIGHT / 2, PKGI_MENU_Z, end - start, PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BAR);
+            }
+            else
+            {
+                pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2, PKGI_MENU_Z, w - 2 * PKGI_DIALOG_PADDING, PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BACKGROUND);
+                pkgi_draw_fill_rect_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING, VITA_HEIGHT / 2, PKGI_MENU_Z, (int)((w - 2 * PKGI_DIALOG_PADDING) * local_progress), PKGI_DIALOG_PROCESS_BAR_HEIGHT, PKGI_COLOR_PROGRESS_BAR);
+
+                char percent[256];
+                pkgi_snprintf(percent, sizeof(percent), "%.0f%%", local_progress * 100.f);
+
+                int percentw = pkgi_text_width(percent);
+                pkgi_draw_text_z((VITA_WIDTH - percentw) / 2, VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING, PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, percent);
+            }
+
+            if (local_eta[0])
+            {
+                pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + PKGI_DIALOG_PADDING,
+                                 VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING,
+                                 PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIM, local_eta);
+            }
+            if (local_size[0])
+            {
+                pkgi_draw_text_z(PKGI_DIALOG_HMARGIN + w - (PKGI_DIALOG_PADDING + pkgi_text_width(local_size)),
+                                 VITA_HEIGHT / 2 + PKGI_DIALOG_PROCESS_BAR_HEIGHT + PKGI_DIALOG_PROCESS_BAR_PADDING,
+                                 PKGI_DIALOG_TEXT_Z, PKGI_COLOR_TEXT_DIALOG, local_size);
+            }
         }
 
         if (local_allow_close)
