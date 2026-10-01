@@ -40,6 +40,7 @@ typedef struct {
 
 static MenuEntry menu_entries[] =
 {
+    { MenuLayout, "Display", 0 },
     { MenuSearch, "Search...", 0 },
     { MenuSearchClear, PKGI_UTF8_CLEAR " clear", 0 },
 
@@ -66,7 +67,6 @@ static MenuEntry menu_entries[] =
     { MenuMode, "Back. DL", 1 },
     { MenuMusic, "Music", 1 },
     { MenuUpdate, "Updates", 1 },
-    { MenuLayout, "Layout", 0 },
 
     { MenuLoadConfig, "Load configuration", 0 },
     { MenuFolder, "Download folder", 0 },
@@ -150,11 +150,29 @@ void pkgi_menu_get(Config* config)
 
 static void set_max_width(const MenuEntry* entries, int size)
 {
-    for (int j, i = 0; i < size; i++)
+    for (int i = 0; i < size; i++)
     {
-        if ((j = pkgi_text_width(entries[i].text) + PKGI_MENU_LEFT_PADDING*2 +
-                 PKGI_FONT_WIDTH + 6) > pkgi_menu_width)
-            pkgi_menu_width = j;
+        int width = pkgi_text_width(entries[i].text) +
+                    PKGI_MENU_LEFT_PADDING * 2 + PKGI_FONT_WIDTH + 6;
+        if (entries[i].type == MenuLayout)
+        {
+            const char* modes[] = { _("Grid"), _("List") };
+            for (uint32_t mode = 0; mode < PKGI_COUNTOF(modes); mode++)
+            {
+                char text[64];
+                pkgi_snprintf(text, sizeof(text), "%s %s: %s",
+                              PKGI_UTF8_CHECK_ON, entries[i].text, modes[mode]);
+                int rendered_width = pkgi_text_width(text) +
+                    PKGI_MENU_LEFT_PADDING * 2 + PKGI_FONT_WIDTH + 6;
+                if (rendered_width > width)
+                    width = rendered_width;
+            }
+        }
+
+        if (width > pkgi_menu_width)
+        {
+            pkgi_menu_width = width;
+        }
     }
 }
 
@@ -166,27 +184,27 @@ void pkgi_menu_start(int search_clear, const Config* config)
     menu_config = *config;
     menu_allow_refresh = config->allow_refresh;
 
-    menu_entries[0].text = _("Search...");
-    menu_entries[2].text = _("Sort by:");
-    menu_entries[3].text = _("Title");
-    menu_entries[4].text = _("Region");
-    menu_entries[5].text = _("Name");
-    menu_entries[6].text = _("Size");
-    menu_entries[7].text = _("Content:");
-    menu_entries[8].text = _("All");
-    menu_entries[9].text = _("Regions:");
-    menu_entries[10].text = _("Asia");
-    menu_entries[11].text = _("Europe");
-    menu_entries[12].text = _("Japan");
-    menu_entries[13].text = _("USA");
-    menu_entries[14].text = _("Status:");
-    menu_entries[15].text = _("Installed");
-    menu_entries[16].text = _("Not installed");
-    menu_entries[17].text = _("Options:");
-    menu_entries[18].text = _("Back. DL");
-    menu_entries[19].text = _("Music");
-    menu_entries[20].text = _("Updates");
-    menu_entries[21].text = _("Layout");
+    menu_entries[0].text = _("Display");
+    menu_entries[1].text = _("Search...");
+    menu_entries[3].text = _("Sort by:");
+    menu_entries[4].text = _("Title");
+    menu_entries[5].text = _("Region");
+    menu_entries[6].text = _("Name");
+    menu_entries[7].text = _("Size");
+    menu_entries[8].text = _("Content:");
+    menu_entries[9].text = _("All");
+    menu_entries[10].text = _("Regions:");
+    menu_entries[11].text = _("Asia");
+    menu_entries[12].text = _("Europe");
+    menu_entries[13].text = _("Japan");
+    menu_entries[14].text = _("USA");
+    menu_entries[15].text = _("Status:");
+    menu_entries[16].text = _("Installed");
+    menu_entries[17].text = _("Not installed");
+    menu_entries[18].text = _("Options:");
+    menu_entries[19].text = _("Back. DL");
+    menu_entries[20].text = _("Music");
+    menu_entries[21].text = _("Updates");
     menu_entries[22].text = _("Load configuration");
     menu_entries[23].text = _("Download folder");
     menu_entries[24].text = _("Refresh...");
@@ -433,8 +451,9 @@ int pkgi_do_menu(pkgi_input* input)
         }
         else if (type == MenuLayout)
         {
-            pkgi_snprintf(text, sizeof(text), "%s %s",
+            pkgi_snprintf(text, sizeof(text), "%s %s: %s",
                 menu_config.grid_mode ? PKGI_UTF8_CHECK_ON : PKGI_UTF8_CHECK_OFF,
+                entry->text,
                 menu_config.grid_mode ? _("Grid") : _("List"));
         }
         else if (type == MenuContent)

@@ -62,6 +62,7 @@
 #define PKGI_ANIMATION_SPEED 4000 // px/second
 
 #define PKGI_FONT_Z      1000
+#define PKGI_ART_TINT_Z  65535
 #define PKGI_FONT_WIDTH  10
 #define PKGI_FONT_HEIGHT 16
 #define PKGI_FONT_SHADOW 2

@@ -45,6 +45,7 @@ static char error_state[256];
 static int osk_target_folder; /* PKGi Remastered: OSK edits download folder */
 
 #define PKGI_THUMBNAIL_SLOTS 16
+#define PKGI_COVER_QUEUE_CAPACITY 32
 
 typedef struct {
     char content[64];
@@ -54,7 +55,17 @@ typedef struct {
 static ThumbnailSlot thumbnails[PKGI_THUMBNAIL_SLOTS];
 static pkgi_texture background_cover;
 static char background_cover_content[64];
-static char cover_request_content[64];
+static int background_art_checked;
+static char cover_request_queue[PKGI_COVER_QUEUE_CAPACITY][64];
+static uint32_t cover_request_head;
+static uint32_t cover_request_count;
+static char cover_active_content[64];
+static char cover_completed_content[64];
+static char cover_selected_content[64];
+static char background_request_content[64];
+static char background_active_content[64];
+static char background_attempted_content[64];
+static int background_request_pending;
 static volatile int cover_worker_active;
 
 static void reposition(void);
@@ -414,30 +425,76 @@ static const char* content_type_str(ContentType content)
     }
 }
 
+static int pkgi_cover_request_queued_locked(const char* content)
+{
+    for (uint32_t i = 0; i < cover_request_count; i++)
+    {
+        uint32_t slot = (cover_request_head + i) % PKGI_COVER_QUEUE_CAPACITY;
+        if (pkgi_stricmp(cover_request_queue[slot], content) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static void pkgi_cover_thread(void)
 {
     for (;;)
     {
-        char content[64];
-        pkgi_dialog_lock();
-        pkgi_strncpy(content, sizeof(content), cover_request_content);
-        pkgi_dialog_unlock();
+        char content[64] = {0};
+        int background_request = 0;
 
-        if (content[0])
+        pkgi_dialog_lock();
+        if (cover_request_count)
         {
-            /* Serialize this image fetch with package creation and install
-             * work, which also touches the shared HTTP/file services. */
-            pkgi_lock_process();
-            pkgi_download_icon(content);
-            pkgi_unlock_process();
+            pkgi_strncpy(content, sizeof(content),
+                cover_request_queue[cover_request_head]);
+            cover_request_head =
+                (cover_request_head + 1) % PKGI_COVER_QUEUE_CAPACITY;
+            cover_request_count--;
+            pkgi_strncpy(cover_active_content, sizeof(cover_active_content),
+                         content);
         }
-
-        pkgi_dialog_lock();
-        if (pkgi_stricmp(content, cover_request_content) == 0)
+        else if (background_request_pending)
+        {
+            pkgi_strncpy(content, sizeof(content), background_request_content);
+            background_request_pending = 0;
+            background_request = 1;
+            pkgi_strncpy(background_active_content,
+                         sizeof(background_active_content), content);
+        }
+        else
         {
             cover_worker_active = 0;
+            cover_active_content[0] = 0;
+            background_active_content[0] = 0;
             pkgi_dialog_unlock();
             break;
+        }
+        pkgi_dialog_unlock();
+
+        /* Serialize image requests with package creation and install work,
+         * which also touches the shared HTTP/file services. */
+        pkgi_lock_process();
+        if (background_request)
+            pkgi_download_background(content);
+        else
+            pkgi_download_icon(content);
+        pkgi_unlock_process();
+
+        pkgi_dialog_lock();
+        if (background_request)
+        {
+            pkgi_strncpy(background_attempted_content,
+                         sizeof(background_attempted_content), content);
+            if (pkgi_stricmp(background_active_content, content) == 0)
+                background_active_content[0] = 0;
+        }
+        else
+        {
+            pkgi_strncpy(cover_completed_content,
+                         sizeof(cover_completed_content), content);
+            if (pkgi_stricmp(cover_active_content, content) == 0)
+                cover_active_content[0] = 0;
         }
         pkgi_dialog_unlock();
     }
@@ -450,20 +507,104 @@ static void pkgi_request_cover(const DbItem* item)
     if (!item || !item->content)
         return;
 
+    pkgi_dialog_lock();
+    if (pkgi_stricmp(cover_active_content, item->content) == 0 ||
+        pkgi_stricmp(cover_completed_content, item->content) == 0 ||
+        pkgi_cover_request_queued_locked(item->content))
+    {
+        pkgi_dialog_unlock();
+        return;
+    }
+    pkgi_dialog_unlock();
+
     char icon_path[128];
     pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
                   item->content + 7);
     if (pkgi_get_size(icon_path) > 0)
+    {
+        pkgi_dialog_lock();
+        pkgi_strncpy(cover_completed_content,
+                     sizeof(cover_completed_content), item->content);
+        pkgi_dialog_unlock();
         return;
+    }
 
     int start_worker = 0;
     pkgi_dialog_lock();
-    if (pkgi_stricmp(cover_request_content, item->content) != 0)
+    if (pkgi_stricmp(cover_active_content, item->content) != 0 &&
+        pkgi_stricmp(cover_completed_content, item->content) != 0 &&
+        !pkgi_cover_request_queued_locked(item->content))
     {
-        pkgi_strncpy(cover_request_content, sizeof(cover_request_content),
-                     item->content);
+        if (cover_request_count == PKGI_COVER_QUEUE_CAPACITY)
+        {
+            /* Keep recent visible items instead of allowing a long scroll
+             * session to fill the queue with thumbnails that are off-screen. */
+            cover_request_head =
+                (cover_request_head + 1) % PKGI_COVER_QUEUE_CAPACITY;
+            cover_request_count--;
+        }
+
+        uint32_t slot =
+            (cover_request_head + cover_request_count) %
+            PKGI_COVER_QUEUE_CAPACITY;
+        pkgi_strncpy(cover_request_queue[slot],
+                     sizeof(cover_request_queue[slot]), item->content);
+        cover_request_count++;
     }
-    if (!cover_worker_active)
+    if (!cover_worker_active &&
+        (cover_request_count || background_request_pending))
+    {
+        cover_worker_active = 1;
+        start_worker = 1;
+    }
+    pkgi_dialog_unlock();
+
+    if (start_worker)
+        pkgi_start_thread("cover_thread", &pkgi_cover_thread);
+}
+
+static void pkgi_request_background(const DbItem* item)
+{
+    if (!item || !item->content || item->type != ContentGame)
+        return;
+
+    pkgi_dialog_lock();
+    if (pkgi_stricmp(background_active_content, item->content) == 0 ||
+        pkgi_stricmp(background_attempted_content, item->content) == 0 ||
+        (background_request_pending &&
+         pkgi_stricmp(background_request_content, item->content) == 0))
+    {
+        pkgi_dialog_unlock();
+        return;
+    }
+    pkgi_dialog_unlock();
+
+    char background_path[128];
+    pkgi_snprintf(background_path, sizeof(background_path),
+                  PKGI_TMP_FOLDER "/%.9s_BG.PNG", item->content + 7);
+    if (pkgi_get_size(background_path) > 0)
+    {
+        pkgi_dialog_lock();
+        pkgi_strncpy(background_attempted_content,
+                     sizeof(background_attempted_content), item->content);
+        pkgi_dialog_unlock();
+        return;
+    }
+
+    int start_worker = 0;
+    pkgi_dialog_lock();
+    if (pkgi_stricmp(background_active_content, item->content) != 0 &&
+        pkgi_stricmp(background_attempted_content, item->content) != 0 &&
+        !(background_request_pending &&
+          pkgi_stricmp(background_request_content, item->content) == 0))
+    {
+        /* Only keep the latest selected title's background request. */
+        pkgi_strncpy(background_request_content,
+                     sizeof(background_request_content), item->content);
+        background_request_pending = 1;
+    }
+    if (!cover_worker_active &&
+        (cover_request_count || background_request_pending))
     {
         cover_worker_active = 1;
         start_worker = 1;
@@ -486,6 +627,7 @@ static pkgi_texture pkgi_get_thumbnail(const DbItem* item, uint32_t slot)
             pkgi_free_texture(thumbnail->texture);
         thumbnail->texture = NULL;
         pkgi_strncpy(thumbnail->content, sizeof(thumbnail->content), item->content);
+        pkgi_request_cover(item);
     }
 
     if (!thumbnail->texture)
@@ -523,24 +665,27 @@ static pkgi_texture pkgi_get_background_cover(const DbItem* item)
         background_cover = NULL;
         pkgi_strncpy(background_cover_content, sizeof(background_cover_content),
                      item->content);
+        background_art_checked = 0;
+    }
+
+    if (!background_cover && !background_art_checked)
+    {
+        /* Installed PS3 titles may include their own full-screen artwork. */
+        background_cover = pkgi_load_local_game_art(item->content, "PIC1.PNG");
+        if (!background_cover)
+            background_cover = pkgi_load_local_game_art(item->content, "PIC0.PNG");
+        background_art_checked = 1;
     }
 
     if (!background_cover)
     {
-        /* Installed PS3 titles may include their own full-screen artwork.
-         * Prefer it to the small XMB icon, then fall back to the cached cover. */
-        background_cover = pkgi_load_local_game_art(item->content, "PIC1.PNG");
-        if (!background_cover)
-            background_cover = pkgi_load_local_game_art(item->content, "PIC0.PNG");
-
-        if (!background_cover)
-        {
-            char icon_path[128];
-            pkgi_snprintf(icon_path, sizeof(icon_path), PKGI_TMP_FOLDER "/%.9s.PNG",
-                          item->content + 7);
-            if (pkgi_get_size(icon_path) > 0)
-                background_cover = pkgi_load_png_file(icon_path);
-        }
+        char background_path[128];
+        pkgi_snprintf(background_path, sizeof(background_path),
+                      PKGI_TMP_FOLDER "/%.9s_BG.PNG", item->content + 7);
+        if (pkgi_get_size(background_path) > 0)
+            background_cover = pkgi_load_png_file(background_path);
+        else
+            pkgi_request_background(item);
     }
 
     return background_cover;
@@ -557,6 +702,8 @@ static void pkgi_free_covers(void)
     if (background_cover)
         pkgi_free_texture(background_cover);
     background_cover = NULL;
+    background_cover_content[0] = 0;
+    background_art_checked = 0;
 }
 
 static void cb_dialog_exit(int res)
@@ -1364,7 +1511,12 @@ int main(int argc, const char* argv[])
             DbItem* selected = pkgi_db_get(selected_item);
             if (selected)
             {
-                pkgi_request_cover(selected);
+                if (pkgi_stricmp(cover_selected_content, selected->content) != 0)
+                {
+                    pkgi_request_cover(selected);
+                    pkgi_strncpy(cover_selected_content,
+                                 sizeof(cover_selected_content), selected->content);
+                }
                 selected_art = pkgi_get_background_cover(selected);
             }
         }
@@ -1372,7 +1524,9 @@ int main(int argc, const char* argv[])
         pkgi_draw_background(selected_art ? selected_art : background);
         if (selected_art)
         {
-            pkgi_draw_fill_rect_alpha_z(0, 0, PKGI_FONT_Z - 10,
+            /* Match the artwork's far plane so the tint cannot depth-occlude
+             * default-depth UI; the interface is drawn after this overlay. */
+            pkgi_draw_fill_rect_alpha_z(0, 0, PKGI_ART_TINT_Z,
                 VITA_WIDTH, VITA_HEIGHT, PKGI_COLOR_ART_TINT, 178);
         }
 

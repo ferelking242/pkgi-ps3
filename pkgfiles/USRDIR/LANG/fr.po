@@ -257,6 +257,15 @@ msgstr "USA"
 msgid "Options:"
 msgstr "Options :"
 
+msgid "Display"
+msgstr "Affichage"
+
+msgid "Grid"
+msgstr "Grille"
+
+msgid "List"
+msgstr "Liste"
+
 msgid "Back. DL"
 msgstr "Tél. fond"
 

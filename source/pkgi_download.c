@@ -9,6 +9,7 @@
 #include <sys/file.h>
 #include <stdio.h>
 #include <dirent.h>
+#include <string.h>
 #include <mini18n.h>
 
 
@@ -789,47 +790,85 @@ int pkgi_install(const char *titleid)
 	return 1;
 }
 
-int pkgi_download_icon(const char* content)
+static int pkgi_download_tmdb_image(const char* content, const char* filename,
+                                    const char* destination, int use_default_icon)
 {
-    char icon_url[256];
-    char icon_file[256];
+    char image_url[256];
+    char tmdb_version[16];
     uint8_t hmac[20];
     uint32_t sz;
 
-    pkgi_snprintf(icon_file, sizeof(icon_file), PKGI_TMP_FOLDER "/%.9s.PNG", content + 7);
-    LOG("package icon file: %s", icon_file);
+    if (!content || strlen(content) < 16)
+        return 0;
 
-    if (pkgi_get_size(icon_file) > 0)
+    if (pkgi_get_size(destination) > 0)
         return 1;
 
-    pkgi_snprintf(icon_url, sizeof(icon_url), "%.9s_00", content + 7);
-    sha1_hmac(tmdb_hmac_key, sizeof(tmdb_hmac_key), (uint8_t*) icon_url, 12, hmac);
+    pkgi_snprintf(tmdb_version, sizeof(tmdb_version), "%.9s_00", content + 7);
+    sha1_hmac(tmdb_hmac_key, sizeof(tmdb_hmac_key),
+              (uint8_t*)tmdb_version, 12, hmac);
 
-    pkgi_snprintf(icon_url, sizeof(icon_url), "http://tmdb.np.dl.playstation.net/tmdb/%.9s_00_%llX%llX%X/ICON0.PNG", 
+    pkgi_snprintf(image_url, sizeof(image_url),
+        "http://tmdb.np.dl.playstation.net/tmdb/%.9s_00_%llX%llX%X/%s",
         content + 7,
-        ((uint64_t*)hmac)[0], 
-        ((uint64_t*)hmac)[1], 
-        ((uint32_t*)hmac)[4]);
+        ((uint64_t*)hmac)[0],
+        ((uint64_t*)hmac)[1],
+        ((uint32_t*)hmac)[4],
+        filename);
 
-    char * buffer = pkgi_http_download_buffer(icon_url, &sz);
+    char* buffer = pkgi_http_download_buffer(image_url, &sz);
 
-    if (!buffer)
+    if (!buffer || !sz)
     {
-        LOG("http request to %s failed", icon_url);
-        return pkgi_save(icon_file, ICONFILE_png, ICONFILE_png_size);
+        LOG("TMDB image request failed: %s", image_url);
+        if (buffer)
+            free(buffer);
+        return use_default_icon
+            ? pkgi_save(destination, ICONFILE_png, ICONFILE_png_size) : 0;
     }
 
-    if (!sz)
+    static const uint8_t png_signature[8] =
+        { 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a };
+    if (!use_default_icon &&
+        (sz < sizeof(png_signature) ||
+         memcmp(buffer, png_signature, sizeof(png_signature)) != 0))
     {
-        LOG("icon not found, using default");
+        LOG("TMDB image is not a PNG: %s", image_url);
         free(buffer);
-        return pkgi_save(icon_file, ICONFILE_png, ICONFILE_png_size);
+        return 0;
     }
 
-    LOG("received %u bytes", sz);
-
-    pkgi_save(icon_file, buffer, sz);
+    int saved = pkgi_save(destination, buffer, sz);
     free(buffer);
+    if (!saved)
+        LOG("could not save TMDB image: %s", destination);
 
-    return 1;
+    return saved;
+}
+
+int pkgi_download_icon(const char* content)
+{
+    char icon_file[128];
+    if (!content || strlen(content) < 16)
+        return 0;
+
+    pkgi_snprintf(icon_file, sizeof(icon_file),
+                  PKGI_TMP_FOLDER "/%.9s.PNG", content + 7);
+    LOG("package icon file: %s", icon_file);
+
+    return pkgi_download_tmdb_image(content, "ICON0.PNG", icon_file, 1);
+}
+
+int pkgi_download_background(const char* content)
+{
+    char background_file[128];
+    if (!content || strlen(content) < 16)
+        return 0;
+
+    pkgi_snprintf(background_file, sizeof(background_file),
+                  PKGI_TMP_FOLDER "/%.9s_BG.PNG", content + 7);
+    LOG("package background file: %s", background_file);
+
+    return pkgi_download_tmdb_image(content, "PIC1.PNG",
+                                    background_file, 0);
 }
